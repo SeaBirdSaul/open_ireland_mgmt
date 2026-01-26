@@ -3,7 +3,7 @@ Tests for booking endpoints
 """
 import pytest
 from datetime import datetime, timedelta
-from models import Booking, Device
+from backend.scheduler.models import Booking, Device
 from unittest.mock import patch, MagicMock
 
 

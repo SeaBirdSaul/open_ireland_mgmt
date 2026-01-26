@@ -1111,7 +1111,7 @@ def _device_history_to_response(history: models.DeviceHistory, db: Session) -> s
 
 # ================== Attachment Management ==================
 
-UPLOAD_DIR = "/app/uploads"
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/app/uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/devices/{device_id}/attachments", response_model=schemas.DeviceResponse)

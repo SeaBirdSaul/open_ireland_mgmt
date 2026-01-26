@@ -10,6 +10,13 @@ import sys
 if not os.getenv("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
+# Ensure uploads go to a writable test directory during tests
+# Some modules create the upload directory at import time (inventory/router.py),
+# so set and create a test-local upload dir before importing application modules.
+if not os.getenv("UPLOAD_DIR"):
+    upload_dir = os.path.join(os.path.dirname(__file__), "test_uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    os.environ["UPLOAD_DIR"] = upload_dir
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -21,7 +28,10 @@ from backend.core.database import Base, SessionLocal
 from backend.main import app
 from backend.core.deps import get_db
 from backend.scheduler.routers.admin import router as admin_router
-from backend.scheduler.routers.admin_v2 import router as admin_v2_router
+try:
+    from backend.scheduler.routers.admin_v2 import router as admin_v2_router
+except Exception:
+    admin_v2_router = None
 from backend.scheduler.routers.control_panel import router as control_panel_router
 from backend.scheduler.models import User, Device, Booking
 from backend.core.hash import hash_password

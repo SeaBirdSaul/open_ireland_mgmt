@@ -3,7 +3,7 @@ Tests for booking approval/rejection endpoints
 """
 import pytest
 from datetime import datetime, timedelta
-from models import Booking
+from backend.scheduler.models import Booking
 from unittest.mock import patch
 
 

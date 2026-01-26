@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from models import (
+from backend.scheduler.models import (
     AdminAuditLog,
     AdminRole,
     Booking,

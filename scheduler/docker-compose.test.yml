@@ -3,10 +3,10 @@ version: '2.1'
 services:
   backend-test:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.test
+      context: ../backend
+      dockerfile: Dockerfile.test.backend
     volumes:
-      - ./backend:/app/backend
+      - ../backend:/app/backend
     environment:
       DATABASE_URL: "sqlite:///:memory:"
       PYTHONUNBUFFERED: "1"
@@ -17,7 +17,7 @@ services:
   frontend-test:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.test
+      dockerfile: Dockerfile.test.frontend
     volumes:
       - ./frontend:/app/frontend
       - frontend-test-node_modules:/app/frontend/node_modules

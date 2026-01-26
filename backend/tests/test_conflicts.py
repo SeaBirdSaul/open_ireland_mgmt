@@ -3,8 +3,8 @@ Tests for conflict detection functionality
 """
 import pytest
 from datetime import datetime, timedelta
-from models import Booking, Device, User
-from hash import hash_password
+from backend.scheduler.models import Booking, Device, User
+from backend.core.hash import hash_password
 
 
 def test_check_conflicts_no_conflicts(authenticated_client, test_device):

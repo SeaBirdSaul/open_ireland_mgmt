@@ -3,7 +3,7 @@ Tests for user authentication endpoints
 """
 import pytest
 from fastapi.testclient import TestClient
-from models import User
+from backend.scheduler.models import User
 
 
 def test_user_registration_success(client, db_session):

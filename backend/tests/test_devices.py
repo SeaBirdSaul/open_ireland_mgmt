@@ -2,7 +2,7 @@
 Tests for device management endpoints (admin only)
 """
 import pytest
-from models import Device
+from backend.scheduler.models import Device
 
 
 def test_get_all_devices(authenticated_admin_client, test_device):

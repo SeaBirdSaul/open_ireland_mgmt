@@ -3,8 +3,8 @@ Integration tests for complete workflows
 """
 import pytest
 from datetime import datetime, timedelta
-from models import User, Device, Booking
-from hash import hash_password
+from backend.scheduler.models import User, Device, Booking
+from backend.core.hash import hash_password
 from unittest.mock import patch
 
 
