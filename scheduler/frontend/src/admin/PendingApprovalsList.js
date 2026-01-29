@@ -1,3 +1,6 @@
+/**
+ * Component for displaying and managing pending booking approvals in the admin interface.
+ */
 import React, { useState, useEffect } from 'react';
 import './admin.css';
 import '../App.css';

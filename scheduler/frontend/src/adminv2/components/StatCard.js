@@ -1,3 +1,9 @@
+/**
+ * StatCard component for displaying key statistics with optional delta and trend sparkline.
+ * Supports click action and displays an icon, label, value, delta badge, hint, and trend data.
+ * Formats numbers and deltas for better readability.
+ * Includes visual indicators for positive/negative deltas and trend sparklines.
+ */
 import React from 'react';
 import { formatDelta, formatNumber } from '../utils/formatters';
 

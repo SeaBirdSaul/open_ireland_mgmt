@@ -1,3 +1,7 @@
+/**
+ * Main admin application component.
+ * Sets up routing, context providers, and overall structure.
+ */
 import React, { useMemo } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';

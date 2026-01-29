@@ -1,3 +1,7 @@
+/**
+ * Page for managing users and roles in the admin interface.
+ * Allows admins to create, edit, and assign roles and permissions to users.
+ */
 import React from 'react';
 import PageHeader from '../components/PageHeader';
 

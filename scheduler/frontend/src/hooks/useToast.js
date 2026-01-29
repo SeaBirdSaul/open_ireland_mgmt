@@ -1,3 +1,7 @@
+/**
+ * Custom hook for managing toast notifications.
+ * Provides methods to add and remove toasts of various types.
+ */
 import { useState, useCallback } from 'react';
 
 let toastIdCounter = 0;

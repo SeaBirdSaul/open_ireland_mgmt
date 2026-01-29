@@ -1,3 +1,7 @@
+/**
+ * The main shell component for the admin interface.
+ * It includes the header, sidebar navigation, and main content area.
+ */
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/authStore';

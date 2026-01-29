@@ -1,4 +1,6 @@
-// TODO: Implement component (placeholder)
+// Header component with dark mode toggle and user info
+// Displays the application title and provides logout functionality
+// Accepts props: user (object), onLogout (function), title (string)
 import React from 'react';
 import { useTheme } from '../../providers/ThemeProvider';
 

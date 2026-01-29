@@ -1,3 +1,7 @@
+/**
+ * Sidebar panel component for filtering devices, applying booking templates,
+ * managing patch lists, and handling favourites and past topologies.
+ */
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import Fuse from 'fuse.js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';

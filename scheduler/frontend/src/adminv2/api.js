@@ -1,3 +1,7 @@
+/**
+ * API utility functions for the admin interface.
+ * Includes functions for making requests to admin endpoints.
+ */
 import { API_BASE_URL } from '../config/api';
 
 const DEFAULT_HEADERS = {

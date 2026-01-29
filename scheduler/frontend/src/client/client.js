@@ -1,3 +1,8 @@
+/**
+ * Client-side Main Component for Lab Scheduler
+ * Handles user authentication, dark mode, calendar interactions,
+ * booking submissions, and reservation management.
+ */
 import React, { useState, useEffect } from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';

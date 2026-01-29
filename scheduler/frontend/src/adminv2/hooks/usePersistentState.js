@@ -1,3 +1,8 @@
+/**
+ * Custom hook to manage persistent state using local storage.
+ * Automatically saves state changes to local storage and initializes from it.
+ * Provides a reset function to revert to the default value.
+ */
 import { useCallback, useEffect, useState } from 'react';
 
 export default function usePersistentState(key, defaultValue) {

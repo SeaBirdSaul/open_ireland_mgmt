@@ -1,3 +1,8 @@
+/**
+ * Utility functions to check user permissions for various admin actions.
+ * Each function checks for specific permission keys.
+ * Used throughout the admin interface to conditionally render features.
+ */
 export function canEditBookings(permissions) {
   return Boolean(permissions?.['bookings:write']);
 }

@@ -1,3 +1,7 @@
+/**
+ * LinkPropertiesPanel component for displaying and editing properties of a selected link.
+ * Allows users to view and modify parameters such as wavelength, loss, fiber type, bandwidth, and notes.
+ */
 import React, { useState, useEffect } from 'react';
 
 export default function LinkPropertiesPanel({ edge, onUpdateParameters }) {

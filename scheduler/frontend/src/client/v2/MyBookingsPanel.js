@@ -1,3 +1,8 @@
+/**
+ * Per User Bookings Panel component for viewing and managing user booking sessions.
+ * Supports cancelling, extending, rebooking sessions, managing collaborators,
+ * and saving favourites.
+ */
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';

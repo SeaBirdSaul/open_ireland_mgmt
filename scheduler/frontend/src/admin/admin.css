@@ -1,5 +1,9 @@
 /* Admin.css */
-
+/**
+ * Styles specific to the admin interface of the scheduler frontend application.
+ * Includes styles for the reservation management page, admin schedule table,
+ * pending approvals list, booking records panel, and pagination.
+ */
 
 /* ----------------- reservation-management Page ----------------- */
 .reservation-management-container {

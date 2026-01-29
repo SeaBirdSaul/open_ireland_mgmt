@@ -1,4 +1,9 @@
 // ScheduleSummary.js
+/**
+ * Displays a summary of the user's selected booking slots,
+ *      merging consecutive time slots into intervals for clarity.
+ * Highlights conflicting bookings in red.
+ */
 import React from 'react';
 
 

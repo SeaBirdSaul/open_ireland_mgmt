@@ -1,4 +1,6 @@
-
+'''
+Script to perform safety checks on the database connection and data integrity.
+'''
 import sys
 from sqlalchemy import create_engine, inspect, text
 

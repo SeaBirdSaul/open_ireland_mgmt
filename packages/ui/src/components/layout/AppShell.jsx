@@ -1,4 +1,6 @@
-// TODO: Implement component (placeholder)
+// AppShell component for layout structure
+// Includes sidebar and header, and renders main content area
+// Accepts props: children (main content), sidebar (sidebar component), header (header component)
 import React from 'react';
 
 export default function AppShell({ children, sidebar, header }) {

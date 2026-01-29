@@ -1,3 +1,8 @@
+/**
+ * Displays selected booking slots, allows message input,
+ * collaborator management, conflict detection, and booking submission.
+ * Integrates with global booking state and backend services.
+ */
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import useBookingState from '../../store/useBookingState';

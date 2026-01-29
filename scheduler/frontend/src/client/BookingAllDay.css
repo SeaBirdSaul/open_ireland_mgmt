@@ -1,3 +1,7 @@
+/**
+ * CSS styles for the multi-device booking popup window.
+ * Includes styles for overlay, popup container, header, body, panels, device list, date picker, and conflict display.
+ */
 /* ========== Overlay ========== */
 .book-multi-device-overlay {
     position: fixed;

@@ -1,3 +1,6 @@
+/**
+ * Displays key metrics and quick links for admin users.
+ */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';

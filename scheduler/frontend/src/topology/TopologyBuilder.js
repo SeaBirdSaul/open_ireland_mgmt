@@ -1,3 +1,9 @@
+/**
+ * TopologyBuilder component for building and managing network topologies.
+ * Includes a canvas for placing nodes and edges, a palette for device types,
+ * a properties panel for editing selected items, and actions for saving,
+ * loading, checking availability, resolving, and booking.
+ */
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Background,

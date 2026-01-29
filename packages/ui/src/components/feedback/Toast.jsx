@@ -1,4 +1,6 @@
-// TODO: Implement component (placeholder)
+// Toast notification component for brief messages
+// Supports different types (info, success, warning, error) and auto-dismissal
+// Accepts props: message (string), type (string), onClose (function), duration (number)
 import React from 'react';
 
 export default function Toast({ 

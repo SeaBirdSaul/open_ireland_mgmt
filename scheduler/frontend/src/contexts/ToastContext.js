@@ -1,3 +1,6 @@
+/**
+ * Toast context providing global access to toast notifications.
+ */
 import React, { createContext, useContext } from 'react';
 import { useToast } from '../hooks/useToast';
 import { ToastContainer } from '../components/Toast';

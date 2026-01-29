@@ -1,3 +1,8 @@
+/**
+ * Checks user session and passes user info to BookingsPage component.
+ * Wraps BookingsPage with ToastProvider for notifications.
+ * Fetches session data on mount to determine if user is logged in.
+ */
 import React, { useState, useEffect } from 'react';
 import BookingsPage from './BookingsPage';
 import { API_BASE_URL } from '../config/api';

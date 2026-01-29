@@ -1,5 +1,8 @@
 # deps.py - Shared FastAPI dependencies
-
+'''
+Defines shared FastAPI dependencies for the backend application,
+    Including database session management.
+'''
 from sqlalchemy.orm import Session
 from backend.core.database import SessionLocal
 

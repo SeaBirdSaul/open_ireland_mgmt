@@ -1,3 +1,7 @@
+/**
+ * QueryProvider component that sets up React Query with improved
+ * error handling for network issues and authentication errors.
+ */
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import useAuthStore from '../store/authStore';

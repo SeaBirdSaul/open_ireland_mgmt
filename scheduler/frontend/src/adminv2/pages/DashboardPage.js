@@ -1,3 +1,10 @@
+/**
+ * DashboardPage component for the admin interface.
+ * Displays key metrics, recent activity, and alerts.
+ * Utilizes React Query for data fetching and state management.
+ * Integrates with routing for navigation to detailed views.
+ * Includes StatCard, ActivityFeed, DeviceHealthPanel, and AlertsPanel components.
+ */
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';

@@ -1,3 +1,9 @@
+/**
+ * MappingOptionsPanel component for displaying a list of mapping options.
+ * Each mapping shows its ID, fit score, number of nodes and links,
+ * notes, and a preview of node mappings with confidence indicators.
+ * Users can select a mapping to view more details.
+ */
 import React from 'react';
 
 export default function MappingOptionsPanel({ mappings, onSelectMapping, selectedMappingId }) {

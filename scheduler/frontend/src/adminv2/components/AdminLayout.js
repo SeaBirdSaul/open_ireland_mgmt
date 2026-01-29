@@ -1,3 +1,7 @@
+/**
+ * Admin layout component for the admin interface.
+ * Includes navigation sidebar, header, and main content area.
+ */
 import React, { useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import usePersistentState from '../hooks/usePersistentState';

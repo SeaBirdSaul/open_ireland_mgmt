@@ -1,3 +1,12 @@
+/**
+ * BookingsPage component for admin interface.
+ * Provides an overview of bookings with filtering, bulk actions, and detailed views.
+ * Supports approving, declining, and resolving booking conflicts.
+ * Includes export functionality and date range selection.
+ * Utilizes React Query for data fetching and state management.
+ * Integrates with AdminContext for permissions and toast notifications.
+ * Implements bulk selection of bookings for efficient management.
+ */
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';

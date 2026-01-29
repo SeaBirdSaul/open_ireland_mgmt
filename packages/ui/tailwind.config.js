@@ -1,3 +1,8 @@
+/*
+  This file configures Tailwind CSS for the frontend of the inventory management system.
+  It specifies the content files to scan for class names, enables dark mode,
+    and extends the default theme with custom colors.
+*/
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [

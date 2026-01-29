@@ -1,3 +1,7 @@
+/**
+ * Page for managing booking approvals in the admin interface.
+ * Displays pending booking requests with options to approve or reject.
+ */
 import React from 'react';
 import PageHeader from '../components/PageHeader';
 

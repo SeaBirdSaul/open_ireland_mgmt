@@ -1,3 +1,8 @@
+/**
+ * Zustand store for managing authentication state.
+ * Includes actions to refresh and clear authentication,
+ * with robust error handling and retry logic.
+ */
 import { create } from 'zustand';
 import { API_BASE_URL } from '../config/api';
 

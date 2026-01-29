@@ -1,5 +1,8 @@
 # models.py
-
+'''
+SQLAlchemy ORM models for the scheduler application.
+Includes models for users, bookings, devices, topologies, and admin features.
+'''
 import uuid
 from sqlalchemy import (
     Column,

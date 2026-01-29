@@ -1,4 +1,5 @@
-// TODO: Implement spacing theme (placeholder)
+// Spacing definitions for the UI theme
+// Defines standard spacing values used throughout the UI
 export const spacing = {
   xs: '0.25rem',   // 4px
   sm: '0.5rem',    // 8px

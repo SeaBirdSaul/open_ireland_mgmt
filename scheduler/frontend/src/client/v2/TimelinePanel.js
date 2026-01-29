@@ -1,3 +1,7 @@
+/**
+ * Timeline panel component for displaying devices and their bookings in a timeline view.
+ * Supports filtering, searching, and grouping of devices.
+ */
 import React, { useMemo, useEffect, useState } from 'react';
 import Fuse from 'fuse.js';
 import { useDevices } from '../../services/deviceService';

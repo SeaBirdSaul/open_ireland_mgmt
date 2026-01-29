@@ -1,3 +1,9 @@
+/**
+ * GlobalSearchBar component for admin interface.
+ * Provides a search input with debounced querying and scope selection.
+ * Displays search suggestions and handles navigation to selected items.
+ * Supports searching across bookings, devices, users, topologies, and logs.
+ */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAdminSearchStore, { SEARCH_SCOPES } from '../state/useAdminSearchStore';

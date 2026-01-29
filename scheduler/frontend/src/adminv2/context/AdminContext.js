@@ -1,3 +1,7 @@
+/**
+ * AdminContext to provide global admin-related state and functions.
+ * Includes user information, permissions, and utility functions for admin components.
+ */
 import React, { createContext, useContext } from 'react';
 
 export const AdminContext = createContext(null);

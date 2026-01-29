@@ -1,3 +1,8 @@
+/**
+ * Zustand store for managing booking state, including selected date ranges,
+ * devices, slots, and collaborators. Persists selections to localStorage
+ * and provides utility functions to manipulate and retrieve selections.
+ */
 import { create } from 'zustand';
 
 const SELECTION_STORAGE_KEY = 'scheduler_device_selection';

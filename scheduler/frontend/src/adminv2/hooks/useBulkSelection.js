@@ -1,3 +1,8 @@
+/**
+ * Custom hook to manage bulk selection of rows in a data table.
+ * Provides functions to toggle selection, clear selection, select all, and check selection status.
+ * Returns the current selection state and selected rows.
+ */
 import { useCallback, useMemo, useState } from 'react';
 
 export default function useBulkSelection(rows, rowIdSelector = (row) => row.id) {

@@ -1,3 +1,8 @@
+/**
+ * Zustand store for managing scheduler state, including filters,
+ * timeline, booking cart, UI state, linked device groups,
+ * booking templates, and bulk booking mode.
+ */
 import { create } from 'zustand';
 
 // Load persisted state from localStorage

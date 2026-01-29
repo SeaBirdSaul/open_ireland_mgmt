@@ -1,5 +1,9 @@
 # router.py - Inventory Management REST API Endpoints
-
+'''
+Defines FastAPI routes for inventory management operations,
+Including CRUD operations for devices, device types, manufacturers, sites, and tags.
+Provides filtering, pagination, and history tracking functionalities.
+'''
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, File, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session

@@ -1,3 +1,8 @@
+/**
+ * FilterBar component for displaying active filters and actions.
+ * Supports removing individual filters and resetting all filters.
+ * Allows additional action buttons to be included.
+ */
 import React from 'react';
 
 export default function FilterBar({ filters, onReset, children }) {

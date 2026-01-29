@@ -1,5 +1,9 @@
 # models.py - Inventory Management Database Models
-
+'''
+Defines SQLAlchemy ORM models for the inventory management system.
+Includes models for devices, device types, manufacturers, sites, tags, 
+    and history tracking.
+'''
 from sqlalchemy import (
     Column,
     Integer,

@@ -1,3 +1,8 @@
+/*
+ * Inventory API client for the Open Ireland Lab inventory management frontend.
+ * Provides functions for interacting with the inventory backend API.
+ * Handles authentication and error responses.
+ */
 import { INVENTORY_API_BASE_URL } from '../config/api';
 
 const DEFAULT_HEADERS = {

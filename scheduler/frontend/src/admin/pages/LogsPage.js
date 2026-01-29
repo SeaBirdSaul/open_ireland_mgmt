@@ -1,3 +1,7 @@
+/**
+ * Page for viewing system logs and audit trails in the admin interface.
+ * Includes filtering, search, and export capabilities.
+ */
 import React from 'react';
 import PageHeader from '../components/PageHeader';
 

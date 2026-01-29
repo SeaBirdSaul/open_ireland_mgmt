@@ -1,3 +1,7 @@
+/**
+ * DataTable component for displaying tabular data with optional selection and bulk actions.
+ * Supports loading state and empty state handling.
+ */
 import React from 'react';
 
 function HeaderCell({ column }) {

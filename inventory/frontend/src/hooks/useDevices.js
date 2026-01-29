@@ -1,3 +1,7 @@
+/**
+ * Provides hooks for managing devices in the inventory system.
+ * Includes listing, fetching, creating, updating, deleting, and bulk operations.
+ */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     fetchDevices,

@@ -1,3 +1,6 @@
+/**
+ * Particle background component that adapts to light and dark themes.
+ */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Particles from 'react-tsparticles';
 import { loadFull } from 'tsparticles';

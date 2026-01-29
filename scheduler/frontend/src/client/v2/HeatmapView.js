@@ -1,3 +1,7 @@
+/**
+ * Heatmap view component for displaying device availability over a date range.
+ * Supports collapsed device groups and visualizes booking status.
+ */
 import React, { useMemo } from 'react';
 import useBookingState from '../../store/useBookingState';
 import useSchedulerStore from '../../store/schedulerStore';

@@ -1,3 +1,8 @@
+/**
+ * Page for managing tags in the inventory system.
+ * Allows viewing, creating, editing, and deleting tags.
+ * Utilizes custom hooks for data fetching and mutations.
+ */
 import React, { useState, useMemo, useCallback } from 'react';
 import { PageHeader, Button, Card, Table, Modal, Alert, Tag } from '@tcdona/ui';
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '../hooks/useInventoryData';

@@ -1,4 +1,9 @@
 # main.py
+'''
+Main application entry point for the backend.
+Sets up FastAPI application, database connections, middleware, and routes.
+Switch board for the backend services
+'''
 from fastapi import (
     FastAPI,
     Depends,

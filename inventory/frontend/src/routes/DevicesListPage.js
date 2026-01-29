@@ -1,3 +1,8 @@
+/**
+ * Displays a list of devices with filtering, searching, pagination,
+ *  and bulk update capabilities.
+ * Utilizes custom hooks for data fetching and state management.
+ */
 import React, { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader, Button, Card, Table, Input, Select, Tag, Alert, Modal } from '@tcdona/ui';

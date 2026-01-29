@@ -1,4 +1,5 @@
 // Navigation configuration for Inventory Management app
+// Defines the sidebar navigation items with labels, paths, and icons.
 
 export const NAV_ITEMS = [
   {

@@ -1,3 +1,7 @@
+/**
+ * Page for managing priority seasons in the admin interface.
+ * Allows admins to enable/disable priority seasons and plan allocations.
+ */
 import React from 'react';
 import PageHeader from '../components/PageHeader';
 import useAdminStore from '../../store/adminStore';

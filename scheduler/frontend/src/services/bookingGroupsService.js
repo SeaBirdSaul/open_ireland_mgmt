@@ -1,3 +1,7 @@
+/**
+ * Service function to fetch grouped bookings for a user.
+ * Interacts with the API to retrieve bookings organized by groups.
+ */
 import { API_BASE_URL } from '../config/api';
 
 export async function fetchGroupedBookings(userId) {

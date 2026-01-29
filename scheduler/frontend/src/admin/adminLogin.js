@@ -1,3 +1,7 @@
+/**
+ * Admin Login and Registration Popup Component
+ * Handles admin user authentication including login, registration, and sign out.
+ */
 import React, { useState, useEffect } from 'react';
 import CryptoJS from 'crypto-js';
 

@@ -1,4 +1,6 @@
-
+'''
+Script to count rows in specific database tables and sample data.
+'''
 import sqlalchemy
 from sqlalchemy import create_engine, text
 

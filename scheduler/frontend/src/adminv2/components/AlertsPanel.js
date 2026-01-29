@@ -1,3 +1,8 @@
+/**
+ * Component to display and manage alerts in the admin interface.
+ * Shows alert severity, title, description, timestamp, tags, and assignment options.
+ * Allows navigation to alert details and assignment to team members.
+ */
 import React, { useState } from 'react';
 import { formatRelative } from '../utils/formatters';
 

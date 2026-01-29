@@ -1,3 +1,8 @@
+/**
+ * TopologyCanvas component that wraps React Flow with error handling.
+ * It provides a canvas for displaying and interacting with network topologies.
+ * Includes an error boundary to suppress benign ResizeObserver errors.
+ */
 import React from 'react';
 import ReactFlow from 'reactflow';
 import 'reactflow/dist/style.css';

@@ -1,4 +1,10 @@
 // admin.js
+/**
+ * Admin Page
+ * The main admin interface for managing devices and reservations.
+ * It includes features such as dark/light mode toggle, user authentication,
+ *      and navigation between different admin functionalities.
+ */
 import React, { useState, useEffect } from 'react';
 import 'react-calendar/dist/Calendar.css';
 import '../App.css';

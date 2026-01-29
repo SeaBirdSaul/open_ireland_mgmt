@@ -1,3 +1,7 @@
+'''
+Admin router for user registration, login, device management, and booking approvals.
+Includes admin authentication and session management.
+'''
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload

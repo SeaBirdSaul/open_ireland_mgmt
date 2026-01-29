@@ -1,3 +1,7 @@
+/**
+ * A reusable modal dialog component for the admin interface.
+ * Supports customizable title, size, and footer actions.
+ */
 import React from 'react';
 import clsx from 'clsx';
 

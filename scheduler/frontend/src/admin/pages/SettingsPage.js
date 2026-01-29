@@ -1,3 +1,7 @@
+/**
+ * Page for managing system settings in the admin interface.
+ * Includes options for configuring preferences, notifications, and integrations.
+ */
 import React from 'react';
 import PageHeader from '../components/PageHeader';
 

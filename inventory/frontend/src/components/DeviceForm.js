@@ -1,3 +1,12 @@
+/**
+ * Used by both DeviceCreate and DeviceEdit pages
+ *
+ * A reusable form component for creating and editing devices in the 
+ *  inventory management system.
+ * Supports both 'create' and 'edit' modes with appropriate field validations.
+ * Utilizes custom hooks to fetch necessary dropdown data (device types, manufacturers, sites).
+ * Handles form state, validation, and submission.
+ */
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Input, Select, Button, Alert } from '@tcdona/ui';
 import { useDeviceTypes, useManufacturers, useSites } from '../hooks/useInventoryData';

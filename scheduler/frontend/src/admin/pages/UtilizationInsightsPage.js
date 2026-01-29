@@ -1,3 +1,7 @@
+/**
+ * Page for viewing utilization insights in the admin interface.
+ * Includes charts and metrics on device usage and fairness.
+ */
 import React from 'react';
 import PageHeader from '../components/PageHeader';
 

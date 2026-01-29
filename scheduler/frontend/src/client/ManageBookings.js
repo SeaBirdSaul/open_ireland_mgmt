@@ -1,3 +1,7 @@
+/**
+ * Allows users to view, search, cancel, and delete their bookings.
+ * Fetches bookings from the backend API and displays them in a table.
+ */
 import React, { useState, useEffect, useCallback } from 'react';
 import backArrow from '../image/back.png'
 import deleteAll from '../image/bin.png'

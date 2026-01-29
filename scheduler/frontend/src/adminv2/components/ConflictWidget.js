@@ -1,3 +1,8 @@
+/**
+ * Component to display and manage topology conflicts in the admin interface.
+ * Shows conflict name, count, submitter, last updated time, and resolve action.
+ * Allows admins to quickly address and resolve conflicts.
+ */
 import React from 'react';
 import { formatRelative } from '../utils/formatters';
 

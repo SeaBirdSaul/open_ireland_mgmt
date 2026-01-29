@@ -1,3 +1,10 @@
+'''
+Defines control panel APIs for managing Raritan PDUs, including adding, deleting, connecting to PDUs,
+reading sensor data, controlling outlets, and retrieving system statistics.
+Uses http://10.10.10.8:8001/model/pdu external API for certain operations.
+
+'''
+
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session

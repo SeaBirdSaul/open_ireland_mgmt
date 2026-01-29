@@ -1,4 +1,6 @@
 // Shared UI Package - Main Export File
+// Exports all components, providers, and themes
+//      from the shared UI package for easy consumption in other projects
 
 // Theme exports
 export * from './theme/index.jsx';

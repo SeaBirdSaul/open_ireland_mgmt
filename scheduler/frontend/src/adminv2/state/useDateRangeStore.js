@@ -1,3 +1,7 @@
+/**
+ * Zustand store for managing date ranges for different admin pages.
+ * Allows setting and retrieving date ranges by page key.
+ */
 import { create } from 'zustand';
 
 const useDateRangeStore = create((set, get) => ({

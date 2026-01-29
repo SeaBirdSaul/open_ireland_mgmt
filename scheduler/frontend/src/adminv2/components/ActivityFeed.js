@@ -1,3 +1,7 @@
+/**
+ * Component to display a feed of recent administrative activities.
+ * Shows action, actor, entity, message, metadata, and timestamp for each activity.
+ */
 import React from 'react';
 import { formatRelative } from '../utils/formatters';
 

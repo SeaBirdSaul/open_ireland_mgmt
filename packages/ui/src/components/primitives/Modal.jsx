@@ -1,4 +1,8 @@
-// TODO: Implement component (placeholder)
+// Modal component for displaying content in an overlay
+// Accepts props: isOpen (boolean), onClose (function), title (string), children (content), size (string), footer (React nodes)
+// Sizes include: sm, md, lg, xl
+// Closes when clicking outside the modal or on the close button
+// Prevents propagation of click events inside the modal content
 import React from 'react';
 import clsx from 'clsx';
 

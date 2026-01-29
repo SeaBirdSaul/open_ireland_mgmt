@@ -1,3 +1,10 @@
+/**
+ * TopologiesPage component for admin interface.
+ * Displays and manages topologies with filtering and action capabilities.
+ * Supports resolving and archiving topologies.
+ * Utilizes React Query for data fetching and state management.
+ * Integrates with AdminContext for permissions and toast notifications.
+ */
 import React, { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';

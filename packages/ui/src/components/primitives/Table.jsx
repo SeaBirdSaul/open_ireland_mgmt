@@ -1,4 +1,12 @@
-// TODO: Implement component (placeholder)
+// Table component for displaying tabular data with optional selection and bulk actions
+// Accepts props: columns (array), rows (array), selection (object), bulkActions (function), loading (boolean), emptyState (React node), onRowClick (function), rowId (function)
+// Columns can have: key (string), header (string), accessor (function), render (function), className (string), headerClassName (string)
+// Selection object should have: state (with count and isAllSelected), methods (selectAll, clear, isSelected, toggle)
+// Bulk actions function receives the selection object and returns React nodes
+// Loading state shows a skeleton, empty state shows a message or custom node
+// Rows are rendered with optional click handler
+// Row ID function defaults to row.id
+ 
 import React from 'react';
 import clsx from 'clsx';
 

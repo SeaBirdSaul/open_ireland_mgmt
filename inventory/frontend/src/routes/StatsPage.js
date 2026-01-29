@@ -1,3 +1,8 @@
+/**
+ * StatsPage component displays an overview of inventory statistics.
+ * It provides metrics such as total device count, devices by status,
+ *  devices by type, and devices by site.
+ */
 import React from 'react';
 import { PageHeader, Card } from '@tcdona/ui';
 

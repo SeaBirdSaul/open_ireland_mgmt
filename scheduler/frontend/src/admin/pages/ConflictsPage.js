@@ -1,3 +1,7 @@
+/**
+ * Page for managing booking conflicts in the admin interface.
+ * Displays conflicting bookings with options to review and resolve.
+ */
 import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';

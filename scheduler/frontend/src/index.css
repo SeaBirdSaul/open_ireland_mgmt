@@ -1,3 +1,8 @@
+/**
+ * index.css
+ * Global styles for the scheduler frontend application.
+ * Includes base styles, dark mode support, animations, and utility classes.
+ */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

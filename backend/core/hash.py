@@ -1,4 +1,8 @@
 # hashing.py
+'''
+Password hashing and verification using bcrypt.
+Provides functions to hash plaintext passwords and verify them against stored hashes.
+'''
 from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

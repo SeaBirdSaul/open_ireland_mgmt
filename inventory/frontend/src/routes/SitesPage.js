@@ -1,3 +1,8 @@
+/**
+ * Page for managing sites in the inventory system.
+ * Allows viewing, creating, editing, and deleting sites.
+ * Utilizes custom hooks for data fetching and mutations.
+ */
 import React, { useState, useMemo, useCallback } from 'react';
 import { PageHeader, Button, Card, Table, Modal, Alert } from '@tcdona/ui';
 import { useSites, useCreateSite, useUpdateSite, useDeleteSite } from '../hooks/useInventoryData';

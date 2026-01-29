@@ -1,3 +1,8 @@
+/**
+ * The schedule table component for the admin interface.
+ * It displays device reservations in a weekly view, allowing admins to see bookings,
+ *       manage device statuses, and handle conflicts.
+ */
 import React, { useState, useEffect, useCallback } from 'react';
 import '../App.css';
 import './admin.css';

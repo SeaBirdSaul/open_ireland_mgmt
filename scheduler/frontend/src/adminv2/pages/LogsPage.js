@@ -1,3 +1,8 @@
+/**
+ * LogsPage component for admin interface.
+ * Displays system logs with filtering options.
+ * Supports filtering by action, actor, scope, and date range.
+ */
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';

@@ -1,3 +1,7 @@
+/**
+ * Component for managing linked device groups in the scheduler.
+ * Allows creating, applying, and deleting groups of linked devices.
+ */
 import React, { useState } from 'react';
 import useSchedulerStore from '../../store/schedulerStore';
 import { useDevices } from '../../services/deviceService';

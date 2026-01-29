@@ -1,3 +1,8 @@
+/**
+ * DeviceHealthPanel component for monitoring and managing device health status.
+ * Displays device information, status, and actions for maintenance and notifications.
+ * Supports filtering by health status tabs.
+ */
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchDevices } from '../api';

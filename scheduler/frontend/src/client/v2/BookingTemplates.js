@@ -1,3 +1,8 @@
+/**
+ * Allows users to view, create, apply, and delete booking templates.
+ * Integrates with global booking state and device data.
+ * Applies selected templates to set date ranges and device selections.
+ */
 import React, { useState, useEffect } from 'react';
 import useSchedulerStore from '../../store/schedulerStore';
 import { useDevices } from '../../services/deviceService';

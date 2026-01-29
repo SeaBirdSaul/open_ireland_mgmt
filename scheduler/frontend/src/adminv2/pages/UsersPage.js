@@ -1,3 +1,10 @@
+/**
+ * UsersPage component for admin interface.
+ * Displays and manages users with filtering, bulk actions, and role assignments.
+ * Integrates with AdminContext for permissions and toast notifications.
+ * Implements bulk selection of users for efficient management.
+ * Supports inviting new users and updating user roles and statuses.
+ */
 import React, { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';

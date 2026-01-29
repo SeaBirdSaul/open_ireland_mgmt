@@ -1,3 +1,8 @@
+/**
+ * Utility functions for grouping booking dates, summarizing devices,
+ * and merging grouped booking entries for the Lab Scheduler application.
+ * Provides functions to format date ranges and build gallery entries.
+ */
 export function groupDatesIntoRanges(dates = []) {
   const sorted = [...new Set(dates)].sort((a, b) => new Date(a) - new Date(b));
   if (sorted.length === 0) {

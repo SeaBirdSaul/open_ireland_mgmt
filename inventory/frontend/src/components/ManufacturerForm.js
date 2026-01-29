@@ -1,3 +1,11 @@
+/**
+ * Used by both ManufacturerCreate and ManufacturerEdit pages
+ * 
+ * A reusable form component for creating and editing manufacturers in 
+ *  the inventory management system.
+ * Supports both 'create' and 'edit' modes with appropriate field validations.
+ * Manages form state, validation, and submission handling.
+ */
 import React, { useState, useEffect } from 'react';
 import { Card, Input, Button, Alert } from '@tcdona/ui';
 

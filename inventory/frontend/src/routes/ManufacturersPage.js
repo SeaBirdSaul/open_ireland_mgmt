@@ -1,3 +1,8 @@
+/**
+ * Page for managing manufacturers in the inventory system.
+ * Allows viewing, creating, editing, and deleting manufacturers.
+ * Utilizes custom hooks for data fetching and mutations.
+ */
 import React, { useState, useMemo, useCallback } from 'react';
 import { PageHeader, Button, Card, Table, Modal, Alert } from '@tcdona/ui';
 import { useManufacturers, useCreateManufacturer, useUpdateManufacturer, useDeleteManufacturer } from '../hooks/useInventoryData';
@@ -138,7 +143,7 @@ export default function ManufacturersPage() {
         title="Manufacturers"
         subtitle="Manage catalog of device manufacturers"
         actions={
-          <Button variant="primary" onClick={() => setIsCreateOpen(true)}>
+          <Button style={{ color: "black", background: "white" }} variant="primary" onClick={() => setIsCreateOpen(true)}>
             Add Manufacturer
           </Button>
         }

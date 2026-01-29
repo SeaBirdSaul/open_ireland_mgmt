@@ -1,3 +1,8 @@
+/**
+ * Utility functions and ScheduleTable component for displaying and managing device booking schedules.
+ * Includes date formatting, range selection, and slot availability checks.
+ * Also handles fetching device and booking data from the backend API.
+ */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import '../App.css';
 import Fuse from 'fuse.js';

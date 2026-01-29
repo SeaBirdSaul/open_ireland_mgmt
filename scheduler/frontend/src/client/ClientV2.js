@@ -1,3 +1,8 @@
+/**
+ * Main client interface for the Lab Scheduler application.
+ * Handles user authentication, dark mode, particle effects,
+ *    calendar interactions, booking submissions, and reservation management.
+ */
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import CryptoJS from 'crypto-js';
 import { useNavigate, useLocation } from 'react-router-dom';

@@ -1,3 +1,8 @@
+/**
+ * Manages bulk selection state for a list of items.
+ * Provides functions to toggle selection, clear selection, select all, 
+ *  and check if an item is selected.
+ */
 import { useCallback, useMemo, useState } from 'react';
 
 export default function useBulkSelection(rows, rowIdSelector = (row) => row.id) {

@@ -1,4 +1,8 @@
 // ManageDevices.js
+/**
+ * Component for managing devices in the admin interface.
+ * Allows adding, editing, deleting, and searching devices.
+ */
 import React, { useState, useEffect } from 'react';
 
 import backArrow from '../image/back.png'

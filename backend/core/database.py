@@ -1,4 +1,8 @@
 # database.py
+'''
+Database configuration and session management using SQLAlchemy.
+Sets up connection pooling to handle stale connections.
+'''
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

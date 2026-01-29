@@ -1,3 +1,10 @@
+/**
+ * ToastContext for Inventory Management Frontend
+ * Provides a context for displaying toast notifications across the app.
+ * Supports success, error, warning, and info toasts.
+ * Includes a ToastProvider to wrap the app and manage toast state.
+ * Exposes a useToastContext hook for easy access to toast functions.
+ */
 import React, { createContext, useContext, useState, useCallback } from 'react';
 
 const ToastContext = createContext(null);

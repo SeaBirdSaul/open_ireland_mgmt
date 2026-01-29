@@ -1,5 +1,9 @@
 # schemas.py
-
+'''
+Pydantic schemas for the scheduler application.
+Includes user, booking, admin, device, and topology schemas
+    with validation and serialization rules.
+'''
 from pydantic import BaseModel, validator, IPvAnyAddress, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date

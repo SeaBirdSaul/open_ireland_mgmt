@@ -1,3 +1,8 @@
+/**
+ * NodePropertiesPanel component for displaying and editing properties of a selected node.
+ * Allows users to view and modify parameters based on device type,
+ * as well as view mapping information and availability forecasts.
+ */
 import React, { useState, useEffect } from 'react';
 
 export default function NodePropertiesPanel({ node, onUpdateParameters, selectedMapping, onOverrideDevice, availabilityForecasts }) {

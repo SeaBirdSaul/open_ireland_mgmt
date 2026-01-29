@@ -1,3 +1,7 @@
+/**
+ * Wraps the application with React Query's QueryClientProvider.
+ * Configures a QueryClient with default options suitable for the inventory management app.
+ */
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 

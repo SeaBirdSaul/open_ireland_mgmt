@@ -1,4 +1,5 @@
-// TODO: Implement component (placeholder)
+// Sidebar component for navigation menu
+// Accepts props: items (array of { key, label, icon, path }), activeItem (string), onItemClick (function)
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 

@@ -1,5 +1,9 @@
 // bookingService.js
-
+/**
+ * Booking Service Utilities
+ * Functions to gather booking intervals from user selections
+ * and submit bookings to the backend API.
+ */
 // Ireland local time
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';

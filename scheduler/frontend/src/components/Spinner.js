@@ -1,3 +1,6 @@
+/**
+ * Spinner component indicating loading state with customizable size and color.
+ */
 import React from 'react';
 
 export default function Spinner({ className = 'h-4 w-4 text-blue-600 dark:text-blue-400' }) {

@@ -1,3 +1,8 @@
+/**
+ * Collaborator input component for adding and managing collaborators by username.
+ * Supports real-time username suggestions, validation against existing users,
+ * and handles errors with visual feedback.
+ */
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { API_BASE_URL } from '../config/api';
 import Spinner from './Spinner';

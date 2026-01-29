@@ -1,3 +1,7 @@
+/**
+ * Provides hooks for managing inventory data such as device types, manufacturers, sites, and tags.
+ * Includes listing, fetching, creating, updating, and deleting operations.
+ */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     fetchDeviceTypes,

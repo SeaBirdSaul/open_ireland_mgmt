@@ -1,3 +1,7 @@
+/**
+ * Handles user authentication including login, registration, and sign out.
+ * Includes enhanced error handling for network issues and timeouts.
+ */
 import React, { useState, useEffect } from 'react';
 import CryptoJS from 'crypto-js';
 

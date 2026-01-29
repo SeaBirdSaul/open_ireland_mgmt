@@ -1,4 +1,5 @@
 
+# Test login functionality of the management server.
 import requests
 import sys
 

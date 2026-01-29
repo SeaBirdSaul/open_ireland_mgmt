@@ -1,3 +1,11 @@
+/**
+ * DevicesPage component for managing and viewing devices in the admin interface.
+ * Supports filtering, bulk actions, and detailed device information.
+ * Utilizes React Query for data fetching and state management.
+ * Integrates with AdminContext for permissions and toast notifications.
+ * Implements bulk selection of devices for efficient management.
+ * Displays device status, ownership, tags, and last updated information.
+ */
 import React, { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';

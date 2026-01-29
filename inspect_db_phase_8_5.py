@@ -1,4 +1,6 @@
-
+'''
+Script to inspect database schema and sample data for specific tables.
+'''
 import os
 import sqlalchemy
 from sqlalchemy import create_engine, text, inspect

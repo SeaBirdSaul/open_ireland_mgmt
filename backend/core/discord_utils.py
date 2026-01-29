@@ -1,4 +1,8 @@
 # backend/discord_utils.py
+'''
+Utility functions for sending notifications to Discord via webhooks.
+Includes functions for booking creation and admin action notifications.
+'''
 import os
 import httpx
 

@@ -1,3 +1,14 @@
+/**
+ * ApprovalsPage component for managing and triaging booking approvals.
+ * Supports filtering, bulk actions, and detailed preview of booking requests.
+ * Integrates with admin context for permissions and uses React Query for data fetching.
+ * Includes keyboard shortcuts for efficiency.
+ * Displays risk scores and conflict indicators for each booking request.
+ * Allows exporting the approval queue as a CSV file.
+ * Utilizes DataTable and FilterBar components for structured UI.
+ * Handles loading and empty states gracefully.
+ * Implements date range presets and custom date selection.
+ */
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';

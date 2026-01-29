@@ -1,3 +1,9 @@
+/**
+ * Displays detailed information about a booking.
+ * Includes booking details, conflict overview, activity log, and device health.
+ * Provides actions to approve, decline, or request changes for the booking.
+ * Integrates with AdminContext for permissions and toast notifications.
+ */
 import React, { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchBookingDetail, approveBookings, declineBookings } from '../api';

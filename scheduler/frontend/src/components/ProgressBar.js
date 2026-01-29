@@ -1,3 +1,6 @@
+/**
+ * Progress bar component displaying completion percentage with optional message.
+ */
 import React from 'react';
 
 export default function ProgressBar({ progress, message, className = '' }) {

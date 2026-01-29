@@ -1,3 +1,8 @@
+/**
+ * DateRangeSelector component allows users to select predefined or custom date ranges
+ * for booking devices. It persists user preferences in local storage and updates
+ * the global booking state accordingly.
+ */
 import React, { useMemo } from 'react';
 import useBookingState from '../../store/useBookingState';
 

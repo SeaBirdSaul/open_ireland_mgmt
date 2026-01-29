@@ -1,4 +1,5 @@
-// TODO: Implement component (placeholder)
+// PageHeader component for displaying page titles, subtitles, actions, and breadcrumbs
+// Accepts props: title (string), subtitle (string), actions (React nodes), breadcrumbs (array of { label: string, path: string })
 import React from 'react';
 import { Link } from 'react-router-dom';
 
