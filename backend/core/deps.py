@@ -2,6 +2,7 @@
 '''
 Defines shared FastAPI dependencies for the backend application,
     Including database session management.
+Can be imported and can then use variable "db" 
 '''
 from sqlalchemy.orm import Session
 from backend.core.database import SessionLocal

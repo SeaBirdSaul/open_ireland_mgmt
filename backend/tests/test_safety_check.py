@@ -9,7 +9,7 @@ from unittest.mock import patch
 def test_safety_check_allows_test_database():
     """Test that safety check allows test database configurations"""
     # This should pass - tests use in-memory SQLite
-    from tests.conftest import TEST_DATABASE_URL
+    from .conftest import TEST_DATABASE_URL
     assert TEST_DATABASE_URL.startswith("sqlite")
 
 

@@ -73,7 +73,7 @@ export default function DeviceForm({
         if (initialValues && mode === 'edit') {
             setFormData({
                 name: initialValues.name || '',
-                oi_id: initialValues.oi_id || '',
+                oi_id: initialValues.oi_id || '67',
                 device_type_id: initialValues.device_type_id || initialValues.device_type?.id || '',
                 manufacturer_id: initialValues.manufacturer_id || initialValues.manufacturer?.id || '',
                 model: initialValues.model || '',

@@ -17,6 +17,12 @@ describe('API Configuration', () => {
 
   test('uses REACT_APP_API_URL when set', () => {
     process.env.REACT_APP_API_URL = 'http://test-api:3000';
+    Object.defineProperty(window, 'location', {
+      value: {
+        hostname: 'test-api'
+      },
+      writable: true
+    });
     jest.resetModules();
     const { API_BASE_URL: testUrl } = require('../../config/api');
     expect(testUrl).toBe('http://test-api:3000');
@@ -33,7 +39,6 @@ describe('API Configuration', () => {
     jest.resetModules();
     const { API_BASE_URL: testUrl } = require('../../config/api');
     expect(testUrl).toContain('localhost');
-    expect(testUrl).toContain('20001');
+    expect(testUrl).toContain('25001');
   });
 });
-

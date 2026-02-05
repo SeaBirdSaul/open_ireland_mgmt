@@ -230,18 +230,20 @@ def update_device_info(device_id: int, update: schemas.DeviceUpdateFull,
             raise HTTPException(status_code=400, detail="IP address already exists for another device")
 
     # Phase U2: Bulk update with JOIN (update all devices with same type/name)
-    (
+    # SQLAlchemy does not allow bulk update on a query with JOINs.
+    # Update in memory instead to keep behavior consistent.
+    same_group_devices = (
         db.query(Device)
         .join(DeviceType)
         .filter(
             DeviceType.name == old_type,
             Device.name == old_name
         )
-        .update(
-            {Device.mgmt_ip: str(update.ip_address) if update.ip_address else None},
-            synchronize_session=False
-        )
+        .all()
     )
+    new_ip = str(update.ip_address) if update.ip_address else None
+    for dev in same_group_devices:
+        dev.mgmt_ip = new_ip
     
     # Update device properties
     # deviceType setter was removed - must handle lookup in router

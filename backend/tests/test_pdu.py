@@ -46,8 +46,8 @@ def test_get_all_pdus(authenticated_admin_client, mock_pdu_config_file):
     """Test getting all PDUs"""
     with patch.dict(os.environ, {'PDU_CONFIG_PATH': mock_pdu_config_file}):
         import importlib
-        import control_panel
-        importlib.reload(control_panel)
+        import backend.scheduler.routers.control_panel
+        importlib.reload(backend.scheduler.routers.control_panel)
         
         response = authenticated_admin_client.get("/control-panel/pdus")
         assert response.status_code == 200
@@ -67,11 +67,11 @@ def test_add_pdu(authenticated_admin_client, mock_pdu_config_file):
     """Test adding a new PDU"""
     with patch.dict(os.environ, {'PDU_CONFIG_PATH': mock_pdu_config_file}):
         import importlib
-        import control_panel
-        importlib.reload(control_panel)
+        import backend.scheduler.routers.control_panel
+        importlib.reload(backend.scheduler.routers.control_panel)
         
         # Mock PDU connection
-        with patch('control_panel.PduController') as mock_controller_class:
+        with patch('backend.scheduler.routers.control_panel.PduController') as mock_controller_class:
             mock_controller = MagicMock()
             mock_controller.get_power.return_value = 1000.0
             mock_controller.get_humidity.return_value = 50.0
@@ -101,8 +101,8 @@ def test_get_pdu_details(authenticated_admin_client, mock_pdu_config_file):
     """Test getting specific PDU details"""
     with patch.dict(os.environ, {'PDU_CONFIG_PATH': mock_pdu_config_file}):
         import importlib
-        import control_panel
-        importlib.reload(control_panel)
+        import backend.scheduler.routers.control_panel
+        importlib.reload(backend.scheduler.routers.control_panel)
         
         response = authenticated_admin_client.get("/control-panel/pdus/PDU1")
         assert response.status_code == 200
@@ -114,8 +114,8 @@ def test_get_pdu_nonexistent(authenticated_admin_client, mock_pdu_config_file):
     """Test getting non-existent PDU"""
     with patch.dict(os.environ, {'PDU_CONFIG_PATH': mock_pdu_config_file}):
         import importlib
-        import control_panel
-        importlib.reload(control_panel)
+        import backend.scheduler.routers.control_panel
+        importlib.reload(backend.scheduler.routers.control_panel)
         
         response = authenticated_admin_client.get("/control-panel/pdus/NONEXISTENT")
         assert response.status_code == 404
@@ -125,8 +125,8 @@ def test_delete_pdu(authenticated_admin_client, mock_pdu_config_file):
     """Test deleting a PDU"""
     with patch.dict(os.environ, {'PDU_CONFIG_PATH': mock_pdu_config_file}):
         import importlib
-        import control_panel
-        importlib.reload(control_panel)
+        import backend.scheduler.routers.control_panel
+        importlib.reload(backend.scheduler.routers.control_panel)
         
         response = authenticated_admin_client.delete("/control-panel/pdus/PDU1")
         assert response.status_code == 200
@@ -137,11 +137,11 @@ def test_get_pdu_sensors(authenticated_admin_client, mock_pdu_config_file):
     """Test getting PDU sensor data"""
     with patch.dict(os.environ, {'PDU_CONFIG_PATH': mock_pdu_config_file}):
         import importlib
-        import control_panel
-        importlib.reload(control_panel)
+        import backend.scheduler.routers.control_panel
+        importlib.reload(backend.scheduler.routers.control_panel)
         
         # Mock PDU controller
-        with patch('control_panel.PduController.get_pdu_controller') as mock_get:
+        with patch('backend.scheduler.routers.control_panel.PduController.get_pdu_controller') as mock_get:
             mock_controller = MagicMock()
             mock_controller.get_temp.return_value = {'value': 25.0, 'unit': 'C'}
             mock_controller.get_humidity.return_value = 50.0
@@ -157,11 +157,11 @@ def test_control_outlet(authenticated_admin_client, mock_pdu_config_file):
     """Test controlling a PDU outlet"""
     with patch.dict(os.environ, {'PDU_CONFIG_PATH': mock_pdu_config_file}):
         import importlib
-        import control_panel
-        importlib.reload(control_panel)
+        import backend.scheduler.routers.control_panel
+        importlib.reload(backend.scheduler.routers.control_panel)
         
         # Mock PDU controller
-        with patch('control_panel.PduController.get_pdu_controller') as mock_get:
+        with patch('backend.scheduler.routers.control_panel.PduController.get_pdu_controller') as mock_get:
             mock_controller = MagicMock()
             mock_controller.get_power.return_value = 1000.0
             mock_get.return_value = mock_controller
@@ -178,8 +178,8 @@ def test_get_system_status(authenticated_admin_client, mock_pdu_config_file):
     """Test getting system-wide PDU statistics"""
     with patch.dict(os.environ, {'PDU_CONFIG_PATH': mock_pdu_config_file}):
         import importlib
-        import control_panel
-        importlib.reload(control_panel)
+        import backend.scheduler.routers.control_panel
+        importlib.reload(backend.scheduler.routers.control_panel)
         
         response = authenticated_admin_client.get("/control-panel/status")
         assert response.status_code == 200
@@ -194,8 +194,8 @@ def test_add_pdu_duplicate_name(authenticated_admin_client, mock_pdu_config_file
     """Test adding PDU with duplicate name"""
     with patch.dict(os.environ, {'PDU_CONFIG_PATH': mock_pdu_config_file}):
         import importlib
-        import control_panel
-        importlib.reload(control_panel)
+        import backend.scheduler.routers.control_panel
+        importlib.reload(backend.scheduler.routers.control_panel)
         
         response = authenticated_admin_client.post(
             "/control-panel/pdus",

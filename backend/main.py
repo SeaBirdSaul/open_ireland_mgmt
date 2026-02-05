@@ -53,7 +53,7 @@ from zoneinfo import ZoneInfo
 from typing import List, Optional, Iterable
 
 from backend.scheduler.routers.admin import router as admin_router
-# from backend.scheduler.routers.admin_v2 import router as admin_v2_router
+from backend.scheduler.routers.adminV2 import router as admin_v2_router
 from backend.scheduler.routers.admin_debug import router as admin_debug_router
 from backend.scheduler.routers.control_panel import router as control_panel_router
 from backend.core.discord_utils import send_booking_created_notification
@@ -71,6 +71,17 @@ app = FastAPI()
 # - Old tables (inventory_items, inventory_history, inventory_reservations, inventory_tags) are no longer created
 # - New tables (devices, device_types, manufacturers, sites, tags, device_tags, device_history) are created
 # - Existing inventory data may need to be dropped or migrated manually
+'''
+    Parameters:
+    - None
+
+    Outputs:
+    - None
+
+    Use:
+    - Creates database tables on startup.
+    - Logs errors and optionally fails fast in debug/dev mode.
+'''
 @app.on_event("startup")
 async def create_tables():
     """Create database tables on application startup"""
@@ -97,7 +108,7 @@ async def create_tables():
 
 
 app.include_router(admin_router)
-# app.include_router(admin_v2_router)
+app.include_router(admin_v2_router)
 app.include_router(admin_debug_router)
 app.include_router(control_panel_router)
 try:
@@ -143,7 +154,19 @@ app.add_middleware(
 
 # Database dependency is now imported from deps.py
 
+'''
+    Parameters:
+    - db: Database session
+    - owner_username: Username of the booking owner
+    - collaborator_usernames: List of collaborator usernames (raw input)
 
+    Outputs:
+    - Tuple of (ordered collaborator usernames, list of User objects)
+    - Returns HTTPException if any collaborator not found
+
+    Use:
+    - Cleans and validates the list of collaborator usernames.
+'''
 def _resolve_collaborators(
     db: Session, owner_username: str, collaborator_usernames: List[str]
 ) -> tuple[List[str], List[models.User]]:
@@ -182,7 +205,18 @@ def _resolve_collaborators(
     ordered_users = [found_map[name] for name in ordered_names]
     return ordered_names, ordered_users
 
+'''
+    Parameters:
+    - db: Database session
+    - booking: The owner Booking object
 
+    Outputs:
+    - List of Booking objects representing collaborator bookings for the same slot
+
+    Use:
+    - Fetches all collaborator booking entries for the same device and time 
+        slot as the given owner booking.
+'''
 def _fetch_collaborator_rows_for_slot(
     db: Session, booking: models.Booking
 ) -> List[models.Booking]:
@@ -198,7 +232,18 @@ def _fetch_collaborator_rows_for_slot(
         .all()
     )
 
+'''
+    Parameters:
+    - db: Database session
+    - owner_booking: The owner booking object
+    - collaborator_users: List of User objects to create collaborator copies for
 
+    Outputs:
+    - Number of collaborator bookings created
+
+    Use:
+    - Creates booking entries for each collaborator user based on the owner booking.
+'''
 def _create_collaborator_copies(
     db: Session,
     owner_booking: models.Booking,
@@ -223,6 +268,16 @@ def _create_collaborator_copies(
     return created
 
 
+'''
+    Parameters:
+    - favorite: BookingFavorite model instance
+
+    Outputs:
+    - Dictionary representation of the BookingFavorite
+
+    Use:
+    - Converts a BookingFavorite model instance to a dictionary for JSON responses.
+'''
 def _favorite_to_dict(favorite: models.BookingFavorite) -> dict:
     return {
         "id": favorite.id,
@@ -237,7 +292,17 @@ def _favorite_to_dict(favorite: models.BookingFavorite) -> dict:
 
 _DEVICE_BOOKING_SUPPORT: Optional[bool] = None
 
+'''
+    Parameters:
+    - db: Database session
 
+    Outputs:
+    - Boolean indicating if device_booking table is supported
+
+    Use: 
+    - Checks if the device_booking table exists in the database.
+    - Logs a warning if inspection fails.
+'''
 def _device_booking_supported(db: Session) -> bool:
     global _DEVICE_BOOKING_SUPPORT
     if _DEVICE_BOOKING_SUPPORT is not None:
@@ -251,6 +316,18 @@ def _device_booking_supported(db: Session) -> bool:
     return _DEVICE_BOOKING_SUPPORT
 
 
+'''
+    Parameters:
+    - db: Database session
+    - booking_ids: Iterable of booking IDs to delete device_booking rows for
+
+    Outputs:
+    - None
+
+    Use:
+    - Deletes entries from the device_booking table for the given booking IDs.
+    - Logs a warning if deletion fails.
+'''
 def _delete_device_booking_rows(db: Session, booking_ids: Iterable[int]) -> None:
     ids = list(booking_ids)
     if not ids:
@@ -269,12 +346,33 @@ def _delete_device_booking_rows(db: Session, booking_ids: Iterable[int]) -> None
 
 
 # ================== Check Session ==================
+'''
+    Parameters:
+    - None
+
+    Outputs:
+    - JSON object with service status and name
+
+    Use:
+    - Health check endpoint to confirm the backend is running.
+'''
 @app.get("/health")
 def health_check():
     """Simple health check endpoint to verify backend is running"""
     return {"status": "ok", "service": "scheduler-backend"}
 
 
+'''
+    Parameters:
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON object with login status and user details when available
+
+    Use:
+    - Returns the current session's authenticated user, if any.
+'''
 @app.get("/session")
 def get_session(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get("user_id")
@@ -285,6 +383,18 @@ def get_session(request: Request, db: Session = Depends(get_db)):
     return {"logged_in": False}
 
 
+'''
+    Parameters:
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON object describing authentication state and user details
+    - HTTP 401 when unauthenticated
+
+    Use:
+    - Returns the currently authenticated user for API clients.
+'''
 @app.get("/api/auth/me")
 def get_current_user(request: Request, db: Session = Depends(get_db)):
     user_id = request.session.get("user_id")
@@ -305,6 +415,18 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     }
 
 
+'''
+    Parameters:
+    - q: Search string
+    - limit: Max number of results (1-20)
+    - db: Database session
+
+    Outputs:
+    - List of user summary objects
+
+    Use:
+    - Search users by username substring for autocomplete.
+'''
 @app.get("/users/search")
 @app.get("/api/users/search")
 def search_users(q: str, limit: int = 10, db: Session = Depends(get_db)):
@@ -326,6 +448,18 @@ def search_users(q: str, limit: int = 10, db: Session = Depends(get_db)):
 
 
 # ================ Public Devices Endpoint (View Only) ================
+'''
+    Parameters:
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - List of Device model instances
+    - HTTP 401 when unauthenticated
+
+    Use:
+    - Returns all devices for authenticated users to view.
+'''
 @app.get("/api/devices")
 @app.get("/devices")
 def get_devices(request: Request, db: Session = Depends(get_db)):
@@ -343,6 +477,19 @@ def get_devices(request: Request, db: Session = Depends(get_db)):
 
 
 # ================ Client Registration ================
+'''
+    Parameters:
+    - user: UserCreate payload
+    - db: Database session
+    - request: Incoming HTTP request (session access)
+
+    Outputs:
+    - User model instance
+    - HTTP 400 when username is taken
+
+    Use:
+    - Registers a new user and starts a session.
+'''
 @app.post("/users/register", response_model=schemas.User)
 def register_user(
     user: schemas.UserCreate, db: Session = Depends(get_db), request: Request = None
@@ -377,6 +524,19 @@ def register_user(
 
 
 # ================ User Login ================
+'''
+    Parameters:
+    - login_data: UserLogin payload
+    - db: Database session
+    - request: Incoming HTTP request (session access)
+
+    Outputs:
+    - JSON object with sign-in confirmation
+    - HTTP 400 on invalid credentials
+
+    Use:
+    - Authenticates a user and stores session user_id.
+'''
 @app.post("/login")
 def login_user(
     login_data: schemas.UserLogin,
@@ -418,6 +578,17 @@ def login_user(
 
 
 # ================ User Logout ================
+'''
+    Parameters:
+    - request: Incoming HTTP request (session access)
+    - response: HTTP response
+
+    Outputs:
+    - JSON response confirming sign-out
+
+    Use:
+    - Clears the session and deletes the session cookie.
+'''
 @app.post("/logout")
 def logout_user(request: Request, response: Response):
     request.session.clear()
@@ -428,6 +599,20 @@ def logout_user(request: Request, response: Response):
 
 
 # ================ Bookings: Single & Multiple Time Slot ================
+'''
+    Parameters:
+    - req: BookingsRequest payload
+    - background_tasks: FastAPI background task handler
+    - db: Database session
+
+    Outputs:
+    - JSON summary of created bookings and grouped ID
+    - HTTPException on validation or DB errors
+
+    Use:
+    - Creates one or more bookings and collaborator copies.
+    - Sends a booking-created notification asynchronously.
+'''
 @app.post("/bookings")
 @app.post("/api/bookings")
 async def create_bookings(
@@ -560,6 +745,21 @@ async def create_bookings(
 
 
 # ================ Cancel Bookings ================
+'''
+    Parameters:
+    - booking_id: ID of the booking to cancel
+    - payload: Optional BookingCancelRequest (includes user_id)
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming cancellation
+    - HTTPException on errors or authorization failures
+
+    Use:
+    - Cancels a booking and any related collaborator bookings.
+    - Updates overlapping booking status if needed.
+'''
 @app.put("/bookings/{booking_id}/cancel")
 @app.put("/api/bookings/{booking_id}/cancel")
 def cancel_booking(
@@ -653,7 +853,20 @@ def cancel_booking(
 
     return {"message": f"Booking {booking_id} has been cancelled"}
 
+'''
+    Parameters:
+    - booking_id: ID of the booking to update
+    - payload: CollaboratorsUpdate payload containing new collaborators
+    - db: Database session
 
+    Outputs:
+    - JSON response with success message and updated collaborators
+    - HTTPException on errors
+
+    Use:
+    - Updates the collaborators for a booking and its related bookings.
+    - Creates new booking entries for collaborators as needed.
+'''
 @app.patch("/bookings/{booking_id}/collaborators")
 @app.patch("/api/bookings/{booking_id}/collaborators")
 def update_booking_collaborators(
@@ -723,6 +936,21 @@ def update_booking_collaborators(
     }
 
 
+'''
+    Parameters:
+    - booking_id: ID of the booking to rebook
+    - payload: RebookRequest payload
+    - background_tasks: FastAPI background task handler
+    - db: Database session
+
+    Outputs:
+    - JSON summary of created bookings
+    - HTTPException on validation or conflicts
+
+    Use:
+    - Recreates bookings in a new date range for the requester.
+    - Sends a booking-created notification asynchronously.
+'''
 @app.post("/bookings/rebook/{booking_id}")
 def rebook_booking(
     booking_id: int,
@@ -867,6 +1095,19 @@ def rebook_booking(
     }
 
 
+'''
+    Parameters:
+    - booking_id: ID of the booking to extend
+    - payload: ExtendBookingRequest payload
+    - db: Database session
+
+    Outputs:
+    - JSON summary of updated bookings
+    - HTTPException on validation or conflicts
+
+    Use:
+    - Extends booking end times and keeps collaborators in sync.
+'''
 @app.patch("/bookings/{booking_id}/extend")
 def extend_booking(
     booking_id: int,
@@ -989,6 +1230,19 @@ def extend_booking(
     }
 
 
+'''
+    Parameters:
+    - grouped_booking_id: Group ID to cancel
+    - payload: GroupActionRequest payload
+    - db: Database session
+
+    Outputs:
+    - JSON summary of cancelled bookings
+    - HTTPException on errors or authorization failures
+
+    Use:
+    - Cancels all bookings in a group.
+'''
 @app.delete("/api/bookings/group/{grouped_booking_id}")
 def cancel_booking_group(
     grouped_booking_id: str,
@@ -1032,6 +1286,19 @@ def cancel_booking_group(
     }
 
 
+'''
+    Parameters:
+    - grouped_booking_id: Group ID to extend
+    - payload: GroupExtendRequest payload
+    - db: Database session
+
+    Outputs:
+    - JSON summary of added bookings
+    - HTTPException on validation or conflicts
+
+    Use:
+    - Extends a booking group by generating additional slots.
+'''
 @app.patch("/api/bookings/group/{grouped_booking_id}/extend")
 def extend_booking_group(
     grouped_booking_id: str,
@@ -1157,6 +1424,21 @@ def extend_booking_group(
     }
 
 
+'''
+    Parameters:
+    - grouped_booking_id: Group ID to rebook
+    - payload: GroupRebookRequest payload
+    - background_tasks: FastAPI background task handler
+    - db: Database session
+
+    Outputs:
+    - JSON summary of created bookings and new group ID
+    - HTTPException on validation or conflicts
+
+    Use:
+    - Recreates an entire booking group across a new date range.
+    - Sends a booking-created notification asynchronously.
+'''
 @app.post("/api/bookings/group/{grouped_booking_id}/rebook")
 def rebook_booking_group(
     grouped_booking_id: str,
@@ -1303,6 +1585,20 @@ def rebook_booking_group(
 # ================ Get one user's all bookings  ================
 
 
+'''
+    Parameters:
+    - user_id: User ID to fetch bookings for
+    - grouped: When true, return grouped booking sessions
+    - db: Database session
+
+    Outputs:
+    - List of booking records (grouped or raw)
+    - HTTPException on errors
+
+    Use:
+    - Returns bookings where the user is owner or collaborator.
+    - Updates expired booking statuses before returning results.
+'''
 @app.get("/bookings/user/{user_id}")
 def get_user_bookings(
     user_id: int,
@@ -1346,6 +1642,16 @@ def get_user_bookings(
     owner_booking_cache: dict[str, Optional[models.Booking]] = {}
     owner_collaborators_cache: dict[str, List[str]] = {}
 
+    '''
+        Parameters:
+        - group_id: Grouped booking ID
+
+        Outputs:
+        - Owner booking instance or None
+
+        Use:
+        - Loads and caches the owner booking for a group.
+    '''
     def ensure_owner_entry(group_id: str) -> Optional[models.Booking]:
         entry = owner_booking_cache.get(group_id)
         if entry is not None and not entry.is_collaborator:
@@ -1465,6 +1771,16 @@ def get_user_bookings(
         )
         device_entry["dates"].add(booking.start_time.date().isoformat())
 
+    '''
+        Parameters:
+        - statuses: Set of booking status values
+
+        Outputs:
+        - Derived group status string
+
+        Use:
+        - Collapses multiple statuses into a single group-level status.
+    '''
     def derive_status(statuses: set[str]) -> str:
         upper_statuses = {s.upper() for s in statuses if s}
         if not upper_statuses:
@@ -1524,6 +1840,17 @@ def get_user_bookings(
 
 
 # ================ Booking Favorites ================
+'''
+    Parameters:
+    - user_id: User ID to fetch favorites for
+    - db: Database session
+
+    Outputs:
+    - List of booking favorites as dictionaries
+
+    Use:
+    - Returns saved booking favorites for a user.
+'''
 @app.get("/bookings/favorites/{user_id}")
 def get_booking_favorites(user_id: int, db: Session = Depends(get_db)):
     favorites = (
@@ -1535,6 +1862,18 @@ def get_booking_favorites(user_id: int, db: Session = Depends(get_db)):
     return [_favorite_to_dict(favorite) for favorite in favorites]
 
 
+'''
+    Parameters:
+    - payload: BookingFavoriteCreate payload
+    - db: Database session
+
+    Outputs:
+    - Booking favorite dictionary
+    - HTTPException if user not found
+
+    Use:
+    - Creates or updates a booking favorite for a user.
+'''
 @app.post("/bookings/favorites")
 def create_booking_favorite(
     payload: BookingFavoriteCreate, db: Session = Depends(get_db)
@@ -1574,6 +1913,19 @@ def create_booking_favorite(
     return _favorite_to_dict(favorite)
 
 
+'''
+    Parameters:
+    - favorite_id: Favorite ID to update
+    - payload: BookingFavoriteUpdate payload
+    - db: Database session
+
+    Outputs:
+    - Updated booking favorite dictionary
+    - HTTPException if favorite not found
+
+    Use:
+    - Updates a booking favorite's name.
+'''
 @app.put("/bookings/favorites/{favorite_id}")
 def update_booking_favorite(
     favorite_id: int, payload: BookingFavoriteUpdate, db: Session = Depends(get_db)
@@ -1592,6 +1944,18 @@ def update_booking_favorite(
     return _favorite_to_dict(favorite)
 
 
+'''
+    Parameters:
+    - favorite_id: Favorite ID to delete
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming deletion
+    - HTTPException if favorite not found
+
+    Use:
+    - Deletes a saved booking favorite.
+'''
 @app.delete("/bookings/favorites/{favorite_id}")
 def delete_booking_favorite(favorite_id: int, db: Session = Depends(get_db)):
     favorite = db.query(models.BookingFavorite).get(favorite_id)
@@ -1603,6 +1967,18 @@ def delete_booking_favorite(favorite_id: int, db: Session = Depends(get_db)):
 
 
 # ================ Delete the expired or cancelled bookings  ================
+'''
+    Parameters:
+    - booking_id: ID of the booking to delete
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming deletion
+    - HTTPException if booking not found
+
+    Use:
+    - Deletes a booking and any related bookings in the same slot.
+'''
 @app.delete("/bookings/{booking_id}")
 def delete_booking(booking_id: int, db: Session = Depends(get_db)):
 
@@ -1630,6 +2006,18 @@ def delete_booking(booking_id: int, db: Session = Depends(get_db)):
 
 
 # ================ Show all booking status  ================
+'''
+    Parameters:
+    - start: Week start date string (YYYY-MM-DD)
+    - db: Database session
+
+    Outputs:
+    - List of booking rows overlapping the week
+    - HTTPException on invalid input or load errors
+
+    Use:
+    - Returns bookings overlapping a given week and marks expired bookings.
+'''
 @app.get("/bookings/for-week")
 def get_bookings_for_week(start: str, db: Session = Depends(get_db)):
 
@@ -1742,6 +2130,17 @@ def get_bookings_for_week(start: str, db: Session = Depends(get_db)):
 
 
 # ================== Confliction check ==================
+'''
+    Parameters:
+    - req: ConflictCheckRequest payload
+    - db: Database session
+
+    Outputs:
+    - List of DeviceConflict objects
+
+    Use:
+    - Computes booking and maintenance conflicts per device over a time window.
+'''
 @app.post("/check-conflicts", response_model=List[schemas.DeviceConflict])
 def check_conflicts(req: schemas.ConflictCheckRequest, db: Session = Depends(get_db)):
     results = []
@@ -1844,6 +2243,19 @@ def check_conflicts(req: schemas.ConflictCheckRequest, db: Session = Depends(get
 
 
 # ================== Topology Management ==================
+'''
+    Parameters:
+    - topology: TopologyCreate payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON response with new topology ID
+    - HTTPException on auth or validation errors
+
+    Use:
+    - Creates a new topology for the authenticated user.
+'''
 @app.post("/topology")
 def create_topology(
     topology: schemas.TopologyCreate,
@@ -1876,6 +2288,20 @@ def create_topology(
     }
 
 
+'''
+    Parameters:
+    - topology_id: Topology ID to update
+    - topology: TopologyUpdate payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming update
+    - HTTPException on auth or validation errors
+
+    Use:
+    - Updates an existing topology owned by the user.
+'''
 @app.put("/topology/{topology_id}")
 def update_topology(
     topology_id: int,
@@ -1910,6 +2336,19 @@ def update_topology(
     }
 
 
+'''
+    Parameters:
+    - topology_id: Topology ID to fetch
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON object containing topology details
+    - HTTPException on auth or not found
+
+    Use:
+    - Returns a single topology owned by the user.
+'''
 @app.get("/topology/{topology_id}")
 def get_topology(
     topology_id: int,
@@ -1942,6 +2381,19 @@ def get_topology(
     }
 
 
+'''
+    Parameters:
+    - user_id: User ID to list topologies for
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON list of topology summaries
+    - HTTPException on auth or authorization errors
+
+    Use:
+    - Lists all topologies for the authenticated user.
+'''
 @app.get("/topology/list")
 def list_topologies(
     user_id: int,
@@ -1978,6 +2430,19 @@ def list_topologies(
     }
 
 
+'''
+    Parameters:
+    - req: TopologyCheckRequest payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON map of mock availability statuses
+    - HTTPException on auth errors
+
+    Use:
+    - Provides a mocked availability check for topology nodes.
+'''
 @app.post("/topology/check-availability")
 def check_topology_availability(
     req: schemas.TopologyCheckRequest,
@@ -2018,6 +2483,19 @@ def check_topology_availability(
     return {"availability": availability}
 
 
+'''
+    Parameters:
+    - req: TopologyResolveRequest payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - TopologyResolveResponse with mappings
+    - HTTPException on auth or resolution errors
+
+    Use:
+    - Resolves logical topology to physical device mappings.
+'''
 @app.post("/topology/resolve")
 def resolve_topology(
     req: schemas.TopologyResolveRequest,
@@ -2129,6 +2607,19 @@ def resolve_topology(
         )
 
 
+'''
+    Parameters:
+    - req: TopologySuggestRequest payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - TopologySuggestResponse with recommendations
+    - HTTPException on auth or recommendation errors
+
+    Use:
+    - Generates topology recommendations based on resolved mappings.
+'''
 @app.post("/topology/suggest")
 def suggest_topology_configurations(
     req: schemas.TopologySuggestRequest,
@@ -2251,6 +2742,19 @@ def suggest_topology_configurations(
         )
 
 
+'''
+    Parameters:
+    - req: AvailabilityForecastRequest payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - AvailabilityForecastResponse with per-device forecasts
+    - HTTPException on auth or forecasting errors
+
+    Use:
+    - Forecasts device availability probabilities.
+'''
 @app.post("/availability/forecast")
 def forecast_availability(
     req: schemas.AvailabilityForecastRequest,
@@ -2297,6 +2801,19 @@ def forecast_availability(
         )
 
 
+'''
+    Parameters:
+    - topology_id: Topology ID to delete
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming deletion
+    - HTTPException on auth or authorization errors
+
+    Use:
+    - Deletes a topology owned by the user.
+'''
 @app.delete("/topology/{topology_id}")
 def delete_topology(
     topology_id: int,

@@ -26,7 +26,7 @@ def test_complete_booking_workflow(authenticated_client, test_user, db_session):
     start_time = datetime.now() + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
-    with patch('main.send_booking_created_notification'):
+    with patch('backend.main.send_booking_created_notification'):
         response = authenticated_client.post(
             "/bookings",
             json={
@@ -65,8 +65,22 @@ def test_complete_booking_workflow(authenticated_client, test_user, db_session):
 
 
 @pytest.mark.integration
-def test_admin_device_management_workflow(authenticated_admin_client):
+def test_admin_device_management_workflow(authenticated_admin_client, db_session):
     """Test complete device management: add -> update -> delete"""
+    from backend.inventory.models import DeviceType
+    # Ensure DeviceType exists for admin endpoint
+    if not db_session.query(DeviceType).filter(DeviceType.name == "Switch").first():
+        db_session.add(
+            DeviceType(
+                name="Switch",
+                category="OPTICAL",
+                description="Switch devices",
+                is_schedulable=True,
+                has_ports=True,
+            )
+        )
+        db_session.commit()
+
     # Add device
     add_response = authenticated_admin_client.post(
         "/admin/devices",
@@ -184,4 +198,3 @@ def test_booking_conflict_detection_workflow(authenticated_client, test_user, db
     conflicts = conflict_response.json()
     assert len(conflicts) > 0
     assert len(conflicts[0]["conflicts"]) > 0
-

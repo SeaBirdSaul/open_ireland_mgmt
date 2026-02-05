@@ -12,7 +12,7 @@ def test_create_single_booking(authenticated_client, test_user, test_device):
     start_time = datetime.now() + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
-    with patch('main.send_booking_created_notification'):
+    with patch('backend.main.send_booking_created_notification'):
         response = authenticated_client.post(
             "/bookings",
             json={
@@ -59,7 +59,7 @@ def test_create_multi_device_booking(authenticated_client, test_user, db_session
     start_time = datetime.now() + timedelta(days=1)
     end_time = start_time + timedelta(hours=3)
     
-    with patch('main.send_booking_created_notification'):
+    with patch('backend.main.send_booking_created_notification'):
         response = authenticated_client.post(
             "/bookings",
             json={
