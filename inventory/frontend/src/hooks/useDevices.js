@@ -57,6 +57,23 @@ export function useDevice(deviceId) {
     });
 }
 
+// Hook for getting total device count
+export function useDeviceCount() {
+    return useQuery({
+        queryKey: ['deviceCount'],
+        queryFn: () => fetchDevices({ limit: 1 }).then((data) => data.total),
+    });
+}
+
+// Hook for getting total device count by status
+export function useDevicesByStatus(status = 'Available') {
+    return useQuery({
+        queryKey: ['deviceCount', 'status', status],
+        queryFn: () => fetchDevices({ status, limit: 1 }).then((data) => data.total),
+        enabled: !!status,
+    });
+}
+
 // Hook for creating a device
 export function useCreateDevice() {
     const queryClient = useQueryClient();
@@ -145,4 +162,3 @@ export function useRemoveTagFromDevice(deviceId) {
         },
     });
 }
-

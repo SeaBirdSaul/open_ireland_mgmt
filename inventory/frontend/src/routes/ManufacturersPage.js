@@ -143,7 +143,7 @@ export default function ManufacturersPage() {
         title="Manufacturers"
         subtitle="Manage catalog of device manufacturers"
         actions={
-          <Button style={{ color: "black", background: "white" }} variant="primary" onClick={() => setIsCreateOpen(true)}>
+          <Button variant="primary" onClick={() => setIsCreateOpen(true)}>
             Add Manufacturer
           </Button>
         }
