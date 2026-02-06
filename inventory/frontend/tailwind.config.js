@@ -4,10 +4,18 @@
     and extends the default theme with custom colors.
 */
 /** @type {import('tailwindcss').Config} */
+const path = require('path');
 module.exports = {
   content: [
-    "./src/**/*.{js,jsx,ts,tsx}",
-    "../../packages/ui/src/**/*.{js,jsx,ts,tsx}",
+    path.join(__dirname, 'src/**/*.{js,jsx,ts,tsx}'),
+    // Local monorepo (repo/packages/ui)
+    path.join(__dirname, '../../packages/ui/src/**/*.{js,jsx,ts,tsx}'),
+    // Docker volume mount (/app/packages/ui)
+    path.join(__dirname, 'packages/ui/src/**/*.{js,jsx,ts,tsx}'),
+    // Symlinked package in node_modules
+    path.join(__dirname, 'node_modules/@tcdona/ui/src/**/*.{js,jsx,ts,tsx}'),
+    // Absolute Docker path (belt-and-suspenders)
+    '/app/packages/ui/src/**/*.{js,jsx,ts,tsx}',
   ],
   darkMode: 'class', // Enable class-based dark mode
   theme: {
@@ -23,5 +31,5 @@ module.exports = {
     },
   },
   plugins: [],
+  //safelist: ['bg-blue-600', 'hover:bg-blue-700', 'text-black', 'disabled:bg-blue-400'],
 }
-
