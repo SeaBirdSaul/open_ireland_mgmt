@@ -57,7 +57,7 @@ export default function SiteForm({
     };
 
     const handleChange = (name, value) => {
-        const processedValue = typeof value === 'string' ? value.trim() : value;
+        const processedValue = typeof value === 'string' ? value : value;
         setFormData((prev) => ({ ...prev, [name]: processedValue }));
         if (errors[name]) {
             setErrors((prev) => {

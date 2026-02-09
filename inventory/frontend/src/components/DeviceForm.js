@@ -157,7 +157,7 @@ export default function DeviceForm({
     // Handle field changes
     const handleChange = (name, value) => {
         // Trim whitespace for text fields
-        const processedValue = typeof value === 'string' && name !== 'notes' ? value.trim() : value;
+        const processedValue = typeof value === 'string' && name !== 'notes' ? value : value;
 
         setFormData((prev) => ({ ...prev, [name]: processedValue }));
 
