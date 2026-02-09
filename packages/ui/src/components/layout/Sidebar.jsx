@@ -7,7 +7,7 @@ export default function Sidebar({ items, activeItem, onItemClick }) {
   const location = useLocation();
   
   return (
-    <aside className="sidebar w-64 bg-white dark:bg-gray-950 border-r border-gray-200 dark:border-gray-800">
+    <aside className="sidebar w-full lg:w-64 bg-white dark:bg-gray-950 border-b lg:border-r border-gray-200 dark:border-gray-800">
       <nav className="p-4 space-y-1">
         {items?.map((item) => {
           const isActive = location.pathname.startsWith(item.path);

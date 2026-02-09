@@ -81,7 +81,7 @@ export default function Table({
   }
 
   return (
-    <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-sm">
+    <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden overflow-x-auto bg-white dark:bg-gray-950 shadow-sm">
       {bulkActions && selection?.state.count > 0 && (
         <div className="bg-blue-50 dark:bg-blue-900/40 border-b border-blue-100 dark:border-blue-800 px-4 py-3 flex items-center justify-between">
           <div className="text-sm font-semibold text-blue-600 dark:text-blue-200">
@@ -99,7 +99,7 @@ export default function Table({
           </div>
         </div>
       )}
-      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+      <table className="min-w-full md:min-w-[640px] divide-y divide-gray-200 dark:divide-gray-800">
         <thead className="bg-gray-50 dark:bg-gray-900/40">
           <tr>
             {hasSelection && (

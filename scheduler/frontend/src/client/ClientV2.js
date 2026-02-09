@@ -626,7 +626,7 @@ function ClientV2Inner() {
                     }}
                   >
                     <aside
-                      className={`glass-panel h-full border-r border-gray-200 dark:border-gray-700 overflow-y-auto transition-all duration-300 ease-in-out ${isFiltersOpen
+                      className={`glass-panel h-full border-r border-gray-200 dark:border-gray-700 overflow-y-auto transition-all duration-300 ease-in-out  ${isFiltersOpen
                         ? 'translate-x-0 opacity-100'
                         : '-translate-x-8 opacity-0 pointer-events-none'
                         }`}

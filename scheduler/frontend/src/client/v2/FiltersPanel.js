@@ -459,7 +459,7 @@ export default function FiltersPanel({ userId, userName, onResetSelection, onHid
 
   return (
     <div 
-      className="h-full glass-panel border-r border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden"
+      className="h-full glass-panel border-r border-gray-200 dark:border-gray-700 flex flex-col max-h-[calc(100vh-(headerHeight))] overflow-y-auto overflow-hidden"
       style={{
         backgroundColor: panelBg,
         transition: 'background-color 0.3s ease-in-out'
@@ -613,7 +613,7 @@ export default function FiltersPanel({ userId, userName, onResetSelection, onHid
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 p-4">
         {/* Search Tab */}
         {activeTab === 'search' && (
           <>
