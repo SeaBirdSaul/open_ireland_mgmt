@@ -68,6 +68,28 @@ export function useInventoryStats() {
     });
 }
 
+// Hook to return the Total number of Sites
+export function useSiteCount() {
+    return useQuery({
+        queryKey: ['siteCount'],
+        queryFn: async () => {
+            const data = await fetchSites({ limit: 500, offset: 0 });
+            return Array.isArray(data) ? data.length : 0;
+        },
+    });
+}
+
+// Hook to return Total number of Types
+export function useDeviceTypeCount() {
+    return useQuery({
+        queryKey: ['deviceTypeCount'],
+        queryFn: async () => {
+            const data = await fetchDeviceTypes({ limit: 500, offset: 0 });
+            return Array.isArray(data) ? data.length : 0;
+        },
+    });
+}
+
 // ================== Device Type Mutations ==================
 
 export function useCreateDeviceType() {

@@ -12,6 +12,7 @@ import {
     bulkUpdateDevices,
     fetchDeviceHistory,
     fetchDeviceTags,
+    fetchDeviceTypes,
     assignTagsToDevice,
     removeTagFromDevice,
 } from '../api/inventoryApi';
@@ -73,6 +74,45 @@ export function useDevicesByStatus(status = 'Available') {
         enabled: !!status,
     });
 }
+
+// Hook for getting total device count by type
+export function useDevicesByTypes(types = []) {
+    return useQuery({
+        queryKey: ['deviceCount', 'device_type_id', types],
+        queryFn: async () => {
+            const results = await Promise.all(
+                types.map((type)=> 
+                    fetchDevices({ device_type_id: type, limit:1 }).then((data) => data.total)
+                )
+            );
+            return types.reduce((acc, type, idx) => {
+                acc[type] = results[idx];
+                return acc;
+            }, {});
+        },
+        enabled: types.length > 0,
+    });
+}
+
+// Hook for getting total device count by site
+export function useDevicesBySite(sites = []) {
+    return useQuery({
+        queryKey: ['deviceCount', 'site_id', sites],
+        queryFn: async () => {
+            const results = await Promise.all(
+                sites.map((site)=> 
+                    fetchDevices({ site_id: site, limit:1 }).then((data) => data.total)
+                )
+            );
+            return sites.reduce((acc, site, idx) => {
+                acc[site] = results[idx];
+                return acc;
+            }, {});
+        },
+        enabled: sites.length > 0,
+    });
+}
+
 
 // Hook for creating a device
 export function useCreateDevice() {
