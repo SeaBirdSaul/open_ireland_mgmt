@@ -7,18 +7,27 @@ import React, { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader, Button, Card, Table, Input, Select, Tag, Alert, Modal } from '@tcdona/ui';
 import { useDevicesList, useBulkUpdateDevices, useCreateDevice } from '../hooks/useDevices';
-import { useDeviceTypes, useSites, useTags } from '../hooks/useInventoryData';
+import { useDeviceTypes, useManufacturers, useSites, useTags } from '../hooks/useInventoryData';
 import useBulkSelection from '../hooks/useBulkSelection';
 import { useToastContext } from '../contexts/ToastContext';
 import DeviceForm from '../components/DeviceForm';
 
+// Newer STATUS_OPTIONS but not on DB yet
+// const STATUS_OPTIONS = [
+//   { value: '', label: 'All Statuses' },
+//   { value: 'active', label: 'Active' },
+//   { value: 'in_maintenance', label: 'In Maintenance' },
+//   { value: 'retired', label: 'Retired' },
+//   { value: 'spare', label: 'Spare' },
+//   { value: 'planned', label: 'Planned' },
+// ];
+
+// Older STATUS_OPTIONS currently being used on DB
 const STATUS_OPTIONS = [
   { value: '', label: 'All Statuses' },
-  { value: 'active', label: 'Active' },
-  { value: 'in_maintenance', label: 'In Maintenance' },
-  { value: 'retired', label: 'Retired' },
-  { value: 'spare', label: 'Spare' },
-  { value: 'planned', label: 'Planned' },
+  { value: 'Available', label: 'Available' },
+  { value: 'Maintenance', label: 'Maintenance' },
+  { value: 'Unavailable', label: 'Retired' },
 ];
 
 const STATUS_VARIANTS = {
@@ -76,6 +85,7 @@ export default function DevicesListPage() {
     device_type_id: '',
     site_id: '',
     tag_id: '',
+    manufacturer_id: '',
     search: '',
   });
 
@@ -99,6 +109,7 @@ export default function DevicesListPage() {
   const { data: deviceTypesData } = useDeviceTypes();
   const { data: sitesData } = useSites();
   const { data: tagsData } = useTags();
+  const { data: manufacturersData} = useManufacturers();
 
   // Bulk update mutation
   const bulkUpdateMutation = useBulkUpdateDevices();
@@ -136,6 +147,16 @@ export default function DevicesListPage() {
     }
     return options;
   }, [tagsData]);
+
+  const manufacturerOptions = useMemo(() => {
+    const options = [{ value: '', label: 'All Manufacturers' }];
+    if (manufacturersData) {
+      manufacturersData.forEach((manufacturer) => {
+        options.push({ value: String(manufacturer.id), label: manufacturer.name });
+      });
+    }
+    return options;
+  }, [manufacturersData]);
 
   // Handle filter changes
   const handleFilterChange = useCallback((key, value) => {
@@ -191,7 +212,6 @@ export default function DevicesListPage() {
     },
     [createDeviceMutation, toast]
   );
-
   // Table columns
   const columns = useMemo(
     () => [
@@ -283,11 +303,15 @@ export default function DevicesListPage() {
       const tagLabel = tagOptions.find((opt) => opt.value === filters.tag_id)?.label;
       active.push({ key: 'tag_id', label: 'Tag', value: tagLabel });
     }
+    if (filters.manufacturer_id){
+      const manufacturerLable = manufacturerOptions.find((opt) => opt.value === filters.manufacturer_id)?.lable;
+      active.push({ key: 'manufacturer_id', lable: 'Manufacturer', value: manufacturerLable});
+    }
     if (filters.search) {
       active.push({ key: 'search', label: 'Search', value: filters.search });
     }
     return active;
-  }, [filters, deviceTypeOptions, siteOptions, tagOptions]);
+  }, [filters, deviceTypeOptions, siteOptions, tagOptions, manufacturerOptions]);
 
   const clearFilters = useCallback(() => {
     setFilters({
@@ -295,6 +319,7 @@ export default function DevicesListPage() {
       device_type_id: '',
       site_id: '',
       tag_id: '',
+      manufacturer_id: '',
       search: '',
     });
     setPagination((prev) => ({ ...prev, page: 1 }));
@@ -345,6 +370,11 @@ export default function DevicesListPage() {
               value={filters.tag_id}
               onChange={(e) => handleFilterChange('tag_id', e.target.value)}
               options={tagOptions}
+            />
+            <Select
+              value={filters.manufacturer_id}
+              onChange={(e) => handleFilterChange('manufacturer_id', e.target.value)}
+              options={manufacturerOptions}
             />
           </div>
           {activeFilters.length > 0 && (

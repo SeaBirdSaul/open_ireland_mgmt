@@ -99,33 +99,36 @@ export default function StatsPage() {
                 {activeTab === 'status' && (
                   <div>
                     Devices by status:
-                      <table style={{ width: '100%' }}>
-                        <tr>
-                          <th style={{ color: 'green' }}>AVAILABLE</th>
-                          <th style={{ color: 'red' }}>MAINTENANCE</th>
-                          <th>RETIRED</th>
-                        </tr>
-                        <tr>
-                          <th style={{ color: 'green' }}>{availableError
-                          ? 'Error'
-                          : isAvailableLoading
-                            ? ' Loading...'
-                            : availableCount}
-                          </th>
-                          <th style={{ color: 'red' }}>{maintenanceError
-                          ? 'Error'
-                          : isMaintenanceLoading
-                            ? ' Loading...'
-                            : maintenanceCount}
-                          </th>
-                          <th>
-                            {retiredError
-                          ? 'Error'
-                          : isRetiredLoading
-                            ? ' Loading...'
-                            : retiredCount}
-                          </th>
-                        </tr>
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr>
+                            <th className="text-left py-2" style={{ color: 'green' }}>AVAILABLE</th>
+                            <th className="text-left py-2" style={{ color: 'red' }}>MAINTENANCE</th>
+                            <th className="text-left py-2" style={{ color: 'grey' }}>RETIRED</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="border-t border-gray-200 dark:border-gray-700">
+                            <td className="py-2" style={{ color: 'green' }}>{availableError
+                            ? 'Error'
+                            : isAvailableLoading
+                              ? ' Loading...'
+                              : availableCount}
+                            </td>
+                            <td className="py-2" style={{ color: 'red' }}>{maintenanceError
+                            ? 'Error'
+                            : isMaintenanceLoading
+                              ? ' Loading...'
+                              : maintenanceCount}
+                            </td>
+                            <td className="py-2" style={{ color: 'grey' }}>{retiredError
+                            ? 'Error'
+                            : isRetiredLoading
+                              ? ' Loading...'
+                              : retiredCount}
+                            </td>
+                          </tr>
+                        </tbody>
                       </table>
                   </div>
                 )}
@@ -149,7 +152,7 @@ export default function StatsPage() {
                                 ? ' Type Error'
                                 : isDeviceTypesLoading
                                   ? 'loading...'
-                                  : typeNameByID[id] || 'Type ${id}'}
+                                  : typeNameByID[id] || `Type ${id}`}
                               </td>
                               <td className="py-2">
                                 {typeCountsError ? 'Error' : isTypeCountsLoading ? 'Loading...' : countsByType?.[id] ?? 0}
@@ -177,10 +180,10 @@ export default function StatsPage() {
                             <tr key={id} className="border-t border-gray-200 dark:border-gray-700">
                               <td className="py-2">
                                 {sitesError
-                                ? ' Type Error'
+                                ? ' Site Error'
                                 : isSitesLoading
                                   ? 'loading...'
-                                  : siteNameByID[id] || 'Type ${id}'}
+                                  : siteNameByID[id] || `Site ${id}`}
                               </td>
                               <td className="py-2">
                                 {siteCountError ? 'Error' : isSiteCountsLoading ? 'Loading...' : countsBySite?.[id] ?? 0}
