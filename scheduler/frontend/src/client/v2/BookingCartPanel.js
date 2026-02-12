@@ -350,6 +350,7 @@ export default function BookingCartPanel({ userId, userName }) {
     hasValidRange,
     selections,
     hasConflicts,
+    allowConflictSubmission,
     selectedDevices,
     message,
     collaborators,
