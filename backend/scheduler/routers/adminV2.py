@@ -72,7 +72,7 @@ def get_dashboard(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/bookings")
-def list_bookings(date_start: str, date_end: str, request: Request, db: Session = Depends(get_db)):
+def list_bookings(request: Request, db: Session = Depends(get_db), date_start: str | None = None, date_end: str | None = None):
     admin_required(request, db)
 
     items = db.query(models.Booking).all()
@@ -134,4 +134,27 @@ def list_logs(request: Request, db: Session = Depends(get_db)):
         ],
         "meta": {"total": len(rows)},
     }
+
+@router.get("/devices")
+def get_devices(request: Request, db: Session = Depends(get_db)):
+    admin_required(request, db)
+    output = db.query(models.Device)
+    rows = output.all()
+    return {
+        "items": [
+            {
+                "id": d.id,
+                "name": getattr(d, "deviceName", None) or getattr(d, "name", None),
+                "type": getattr(d, "deviceType", None),
+                "status": getattr(d, "status", None),
+                "owner": None,
+                "tags": [],
+                "polatis_name": getattr(d, "polatis_name", None),
+            }
+            for d in rows
+        ],
+        "meta": {"total": len(rows)},
+    }
+
+#@router.get("/devices/status")
 

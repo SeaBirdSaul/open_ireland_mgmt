@@ -122,9 +122,9 @@ export default function DevicesPage() {
           ),
       },
       {
-        key: 'last_updated',
-        header: 'Updated',
-        render: (row) => (row.last_updated ? formatDateTime(row.last_updated) : '—'),
+        key: 'polatis_name',
+        header: 'Polatis Name',
+        render: (row) => (row.polatis_name ? row.polatis_name : '—'),
       },
     ],
     []
