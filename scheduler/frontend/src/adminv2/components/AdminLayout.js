@@ -274,10 +274,16 @@ function AdminLayout({ children }) {
               <button
                 type="button"
                 onClick={logout}
-                className="hidden sm:inline-flex items-center rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                className="hidden sm:inline-flex items-center rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:ring-offset-1"
               >
                 Sign out
               </button>
+              <NavLink
+              to="/"
+              className="hidden sm:inline-flex items-center rounded-md border-slate-200 dark:border-slate-700 px-3 py-2 text-us font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              Back to Client
+            </NavLink>
             </div>
           </div>
         </header>

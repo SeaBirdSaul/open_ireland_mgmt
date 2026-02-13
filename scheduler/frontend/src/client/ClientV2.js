@@ -91,6 +91,7 @@ function ClientV2Inner() {
   }, []);
 
   const toast = useToastContext();
+  const { error: showToastError } = useToastContext();
   const isAuthenticated = authenticated;
 
   // Safe refresh auth function that prevents race conditions
@@ -115,14 +116,26 @@ function ClientV2Inner() {
       }
       
       // Check if we were redirected from admin route and show toast
-      if (location.state?.adminRedirect) {
-        setTimeout(() => {
-          toast.error(location.state.adminRedirect);
-        }, 300); // Small delay to ensure toast context is ready
-      }
+      // if (location.state?.adminRedirect) {
+      //   setTimeout(() => {
+      //     toast.error(location.state.adminRedirect);
+      //   }, 3000); // Small delay to ensure toast context is ready
+      // }
     }
-  }, [location.pathname, location.state, safeRefreshAuth, toast]);
+  }, [location.pathname, safeRefreshAuth]); // Changed from [location.pathname, location.state, safeRefreshAuth, toast]
 
+  // Show admin redirect message once then clear history state
+  useEffect(() => {
+    const message = location.state?.adminRedirect;
+    if(!message) return;
+    showToastError(message);
+
+    navigate('${location.pathname}${location.search}&{location.hash}', {
+      replace: true,
+      state: null,
+    });
+  }, [location.path, location.search, location.hash, location.state?.adminRedirect, navigate, showToastError,]);
+  
   // Clear navigation state when route changes (separate effect to avoid dependency issues)
   useEffect(() => {
     if (isNavigating) {

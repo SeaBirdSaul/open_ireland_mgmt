@@ -6,6 +6,10 @@
 import { create } from 'zustand';
 import { API_BASE_URL } from '../config/api';
 
+const UNAUTH_REFRESH_COOLDOWN_MS = 5000; // Timeout to prevent spamming refreshes
+let inUseRefresh = null;
+let lastUnauthAt = 0;
+
 const useAuthStore = create((set, get) => ({
   // Auth state
   authenticated: false,
@@ -16,33 +20,46 @@ const useAuthStore = create((set, get) => ({
 
   // Actions
   refreshAuth: async (retryCount = 0) => {
-    set({ loading: true });
-    try {
-      // Create abort controller for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-      
-      const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        method: 'GET',
-        credentials: 'include',
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
+    if(inUseRefresh){
+      return inUseRefresh;
+    }
+    const state = get();
+    const now = Date.now();
 
-      // Handle network errors or non-OK responses
-      if (!res.ok) {
-        // 401/403 are expected for unauthenticated users, don't log as errors
-        if (res.status === 401 || res.status === 403) {
-          set({
-            authenticated: false,
-            userId: null,
-            username: null,
-            isAdmin: false,
-            loading: false,
-          });
-          return;
-        }
+    if(retryCount === 0 && !state.authenticated && now - lastUnauthAt < UNAUTH_REFRESH_COOLDOWN_MS) {
+      set({ loading: false });
+      return;
+    }
+
+    inUseRefresh = (async () => {
+      set({ loading: true });
+      try {
+        // Create abort controller for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        
+        const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          method: 'GET',
+          credentials: 'include',
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+
+        // Handle network errors or non-OK responses
+        if (!res.ok) {
+          // 401/403 are expected for unauthenticated users, don't log as errors
+          if (res.status === 401 || res.status === 403) {
+            set({
+              authenticated: false,
+              userId: null,
+              username: null,
+              isAdmin: false,
+              loading: false,
+            });
+            return;
+          }
+
         // Other errors (500, network issues, etc.) - retry if it's a server error
         if (res.status >= 500 && retryCount < 2) {
           // Retry server errors up to 2 times with exponential backoff
@@ -81,8 +98,9 @@ const useAuthStore = create((set, get) => ({
           isAdmin: false,
           loading: false,
         });
-      }
-    } catch (err) {
+      }    
+    }
+    catch (err) {
       // Network errors, CORS issues, timeout, etc.
       // Retry network errors up to 2 times
       if (
@@ -101,14 +119,16 @@ const useAuthStore = create((set, get) => ({
         set({ loading: false });
         return;
       }
-      
       // For other errors, log but don't clear auth state
       console.error('Failed to refresh auth', err);
       set({ loading: false });
-    }
+    } finally { inUseRefresh = null; }
+  })();
+  return inUseRefresh;      
   },
 
-  clearAuth: () => {
+  clearAuth: () => { 
+    lastUnauthAt = Date.now();
     set({
       authenticated: false,
       userId: null,
