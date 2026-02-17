@@ -127,7 +127,12 @@ export default function DataTable({
                 ]
                   .filter(Boolean)
                   .join(' ')}
-                onClick={() => onRowClick?.(row)}
+                onClick={(event) => {
+                  if (event.target.type === 'checkbox') {
+                    return;
+                  }
+                  onRowClick?.(row);
+                }}
               >
                 {hasSelection && (
                   <td className="px-4 py-3">

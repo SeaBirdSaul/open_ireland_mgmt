@@ -133,7 +133,7 @@ function AdminAppInner() {
         <WhatIsNewTour />
         <AdminLayout>
           <Routes>
-            <Route index element={<Navigate to="approvals" replace />} />
+            <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="approvals" element={<ApprovalsPage />} />
             <Route path="bookings" element={<BookingsPage />} />

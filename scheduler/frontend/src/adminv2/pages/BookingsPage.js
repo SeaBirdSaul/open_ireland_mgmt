@@ -30,6 +30,7 @@ import {
   canExportBookings,
 } from '../utils/permissions';
 import BookingDetailDrawer from '../sections/BookingDetailDrawer';
+import ConflictResolutionModal from '../sections/ConflictResolutionModal';
 
 const STATUS_OPTIONS = [
   { key: 'PENDING', label: 'Pending' },
@@ -68,14 +69,9 @@ export default function BookingsPage() {
     end: null,
     preset: 'This Week',
   });
-  const [focusedBookingId, setFocusedBookingId] = useState(() => searchParams.get('focus'));
-
-  useEffect(() => {
-    const focus = searchParams.get('focus');
-    if (focus && focus !== focusedBookingId) {
-      setFocusedBookingId(focus);
-    }
-  }, [focusedBookingId, searchParams]);
+  const focusedBookingId = searchParams.get('focus');
+  const conflictResolutionId1 = searchParams.get('resolve-id-1');
+  const conflictResolutionId2 = searchParams.get('resolve-id-2');
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -107,7 +103,7 @@ export default function BookingsPage() {
   const approveMutation = useMutation({
     mutationFn: (payload) => approveBookings(payload),
     onSuccess: async (result) => {
-      toast.success(`Approved ${result.succeeded.length} bookings.`);
+      toast.success(`Approved ${result.updated.length} bookings.`);
       await queryClient.invalidateQueries({ queryKey: ['admin-bookings'] });
       selection.clear();
     },
@@ -117,22 +113,22 @@ export default function BookingsPage() {
   const declineMutation = useMutation({
     mutationFn: (payload) => declineBookings(payload),
     onSuccess: async (result) => {
-      toast.success(`Declined ${result.succeeded.length} bookings.`);
+      toast.success(`Declined ${result.updated.length} bookings.`);
       await queryClient.invalidateQueries({ queryKey: ['admin-bookings'] });
       selection.clear();
     },
     onError: (err) => toast.error(err?.message || 'Unable to decline bookings.'),
   });
 
-  const resolveMutation = useMutation({
-    mutationFn: (payload) => resolveConflicts(payload),
-    onSuccess: async () => {
-      toast.success('Conflicts resolved.');
-      await queryClient.invalidateQueries({ queryKey: ['admin-bookings'] });
-      selection.clear();
-    },
-    onError: (err) => toast.error(err?.message || 'Unable to resolve conflicts.'),
-  });
+  // const resolveMutation = useMutation({
+  //   mutationFn: (payload) => resolveConflicts(payload),
+  //   onSuccess: async () => {
+  //     toast.success('Conflicts resolved.');
+  //     await queryClient.invalidateQueries({ queryKey: ['admin-bookings'] });
+  //     selection.clear();
+  //   },
+  //   onError: (err) => toast.error(err?.message || 'Unable to resolve conflicts.'),
+  // });
 
   const handleBulkApprove = () => {
     const ids = Array.from(selection.state.ids);
@@ -146,9 +142,17 @@ export default function BookingsPage() {
 
   const handleResolveConflicts = () => {
     const ids = Array.from(selection.state.ids);
-    resolveMutation.mutate({
-      resolution: ids.map((id) => ({ booking_id: id, status: 'CONFIRMED' })),
-    });
+
+    if (ids.length === 2){
+      const next = new URLSearchParams(searchParams);
+      next.set('resolve-id-1', ids[0]);
+      next.set('resolve-id-2', ids[1]);
+      setSearchParams(next, { replace: true });
+    } else if (ids.length > 2){
+      toast.error('Select exactly 2 conflicting bookings to compare and resolve.');
+    } else if (ids.length === 1){
+      toast.error('Select at least 2 bookings to resolve conflicts.');
+    }
   };
 
   const columns = useMemo(
@@ -284,6 +288,9 @@ export default function BookingsPage() {
 
   const bulkActions = (selectionState) => {
     const disabled = selectionState.count === 0;
+    const hasCancelledBooking = selection.selectedRows.some(
+      (row) => row.status === 'CANCELLED'
+    );
     return (
       <div className="flex items-center gap-2">
         {canEditBookings(permissions) && (
@@ -291,7 +298,7 @@ export default function BookingsPage() {
             <button
               type="button"
               onClick={handleBulkApprove}
-              disabled={disabled || approveMutation.isPending}
+              disabled={disabled || approveMutation.isPending || hasCancelledBooking}
               className="px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
             >
               Approve
@@ -299,7 +306,7 @@ export default function BookingsPage() {
             <button
               type="button"
               onClick={handleBulkDecline}
-              disabled={disabled || declineMutation.isPending}
+              disabled={disabled || declineMutation.isPending || hasCancelledBooking}
               className="px-3 py-1.5 text-xs font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
             >
               Decline
@@ -307,7 +314,7 @@ export default function BookingsPage() {
             <button
               type="button"
               onClick={handleResolveConflicts}
-              disabled={disabled || resolveMutation.isPending}
+              disabled={disabled || hasCancelledBooking}
               className="px-3 py-1.5 text-xs font-semibold rounded-md bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-60"
             >
               Resolve conflicts
@@ -318,18 +325,35 @@ export default function BookingsPage() {
     );
   };
 
-  const handleRowClick = (row) => {
-    setFocusedBookingId(row.booking_id);
+  const prevSelectionRef = React.useRef(selection.state.ids);
+  const handleRowClick = (row, event) => {
+    // Don't trigger if checkbox is clicked
+    const currentIds = selection.state.ids;
+    const selectionChanged = currentIds.size !== prevSelectionRef.current.size ||
+      ![...currentIds].every(id => prevSelectionRef.current.has(id));
+
+    if (selectionChanged){
+      prevSelectionRef.current = new Set(currentIds);
+      return;
+    }
+
     const next = new URLSearchParams(searchParams);
     next.set('focus', row.booking_id);
     setSearchParams(next, { replace: true });
   };
 
   const handleCloseDrawer = () => {
-    setFocusedBookingId(null);
     const next = new URLSearchParams(searchParams);
     next.delete('focus');
     setSearchParams(next, { replace: true });
+  };
+
+  const handleCloseConflictResolution = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('resolve-id-1');
+    next.delete('resolve-id-2');
+    setSearchParams(next, { replace: true });
+    selection.clear();
   };
 
   const handleExport = () => {
@@ -397,7 +421,7 @@ export default function BookingsPage() {
         selection={canEditBookings(permissions) ? selection : null}
         bulkActions={canEditBookings(permissions) ? bulkActions : null}
         loading={bookingsQuery.status === 'pending'}
-        onRowClick={handleRowClick}
+        onRowClick={canEditBookings(permissions) ? handleRowClick : undefined}
         rowId={(row) => row.booking_id}
       />
 
@@ -405,6 +429,12 @@ export default function BookingsPage() {
         bookingId={focusedBookingId}
         open={Boolean(focusedBookingId)}
         onClose={handleCloseDrawer}
+      />
+      <ConflictResolutionModal
+        bookingId1={conflictResolutionId1}
+        bookingId2={conflictResolutionId2}
+        open={Boolean(conflictResolutionId1 && conflictResolutionId2)}
+        onClosed={handleCloseConflictResolution}
       />
     </div>
   );
