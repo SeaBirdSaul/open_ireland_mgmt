@@ -267,7 +267,45 @@ def _create_collaborator_copies(
         created += 1
     return created
 
+'''
+    
 
+'''
+ACTIVE_BOOKING_STATUS = ["PENDING", "CONFLICTING", "CONFIRMED"]
+INACTIVE_BOOKING_STATUS = ["CANCELLED", "EXPIRED", "REJECTED", "DECLINED"]
+def _find_overlapping_owner_bookings(
+    db: Session, device_id: int, start_time: datetime, end_time: datetime
+) -> List[models.Booking]:
+    return(
+        db.query(models.Booking)
+        .filter(
+            models.Booking.device_id == device_id,
+            models.Booking.is_collaborator.is_(False),
+            models.Booking.end_time > start_time,
+            models.Booking.start_time < end_time,
+            models.Booking.status.in_(ACTIVE_BOOKING_STATUS),
+        )
+        .with_for_update()
+        .all()
+    )
+
+'''
+
+'''
+def _mark_slot_group_status(db: Session, owner_booking: models.Booking, status: str) -> None:
+    related = (
+        db.query(models.Booking)
+        .filter(
+            models.Booking.grouped_booking_id == owner_booking.grouped_booking_id,
+            models.Booking.device_id == owner_booking.device_id,
+            models.Booking.start_time == owner_booking.start_time,
+            models.Booking.end_time == owner_booking.end_time,
+            models.Booking.status.notin_(INACTIVE_BOOKING_STATUS),
+        )
+        .all()
+    )
+    for row in related:
+        row.status = status
 '''
     Parameters:
     - favorite: BookingFavorite model instance
@@ -674,6 +712,15 @@ async def create_bookings(
                     db.rollback()
                     raise HTTPException(status_code=500, detail="Database error")
 
+            requested_status = (b.status or "PENDING").upper()
+
+            overlapping_owners = _find_overlapping_owner_bookings(
+                db, device.id, b.start_time, b.end_time
+            )
+
+            has_overlap_conflict = len(overlapping_owners) > 0
+            final_status = "CONFLICTING" if (requested_status == "CONFLICTING" or has_overlap_conflict) else requested_status
+
             # Create this booking
             new_booking = models.Booking(
                 device_id=device.id,
@@ -681,7 +728,7 @@ async def create_bookings(
                 is_collaborator=False,
                 start_time=b.start_time,
                 end_time=b.end_time,
-                status=b.status,
+                status=final_status,
                 comment=req.message,
                 collaborators=collaborator_usernames
                 if collaborator_usernames
@@ -689,6 +736,13 @@ async def create_bookings(
                 grouped_booking_id=grouped_booking_id,
             )
             db.add(new_booking)
+            db.flush()
+
+            if final_status == "CONFLICTING":
+                _mark_slot_group_status(db, new_booking, "CONFLICTING")
+                for existing_owner in overlapping_owners:
+                    _mark_slot_group_status(db, existing_owner, "CONFLICTING")
+
             count_inserted += 1
 
             if collaborator_users:
