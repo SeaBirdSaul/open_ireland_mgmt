@@ -111,7 +111,8 @@ def list_bookings(
     
     if date_end:
         end_dt = datetime.fromisoformat(date_end)
-        query = query.filter(models.Booking.end_time <= end_dt)
+        end_dt = end_dt + timedelta(days=1)
+        query = query.filter(models.Booking.end_time < end_dt)
     
     if status:
         query = query.filter(models.Booking.status == status)
