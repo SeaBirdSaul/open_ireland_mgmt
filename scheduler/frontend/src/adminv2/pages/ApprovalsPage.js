@@ -192,7 +192,7 @@ export default function ApprovalsPage() {
   const approveMutation = useMutation({
     mutationFn: (payload) => approveBookings(payload),
     onSuccess: async (result) => {
-      toast.success(`Approved ${result.succeeded.length} requests.`);
+      toast.success(`Approved ${result.updated.length} requests.`);
       await queryClient.invalidateQueries({ queryKey: ['admin-approvals'] });
       selection.clear();
     },
@@ -202,7 +202,7 @@ export default function ApprovalsPage() {
   const declineMutation = useMutation({
     mutationFn: (payload) => declineBookings(payload),
     onSuccess: async (result) => {
-      toast.success(`Declined ${result.succeeded.length} requests.`);
+      toast.success(`Declined ${result.updated.length} requests.`);
       await queryClient.invalidateQueries({ queryKey: ['admin-approvals'] });
       selection.clear();
     },
