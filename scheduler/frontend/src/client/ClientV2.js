@@ -15,6 +15,8 @@ import { API_BASE_URL } from '../config/api';
 import { ToastProvider, useToastContext } from '../contexts/ToastContext';
 import { useLiveUpdates } from '../hooks/useLiveUpdates';
 import AccessibilityMenu from '../components/AccessibilityMenu';
+import { fetchGroupedBookings } from '../services/bookingGroupsService';
+import StatusUpdate from './v2/StatusUpdatePopup';
 const ParticleBackground = lazy(() => import('../components/ParticleBackground'));
 
 const SIDEBAR_PREFERENCE_STORAGE_KEY = 'scheduler_filters_sidebar_open';
@@ -32,7 +34,7 @@ function ClientV2Inner() {
   const location = useLocation();
 
   // Use centralized auth store
-  const { authenticated, userId, username: userName, isAdmin, loading: isCheckingAuth, refreshAuth, clearAuth } = useAuthStore();
+  const { authenticated, userId, username: userName, isAdmin, loading: isCheckingAuth, refreshAuth, clearAuth, previousLoginAt, lastLoginAt } = useAuthStore();
   
   // Use ref to track if auth refresh is in progress to prevent race conditions
   const authRefreshInProgress = useRef(false);
@@ -67,6 +69,7 @@ function ClientV2Inner() {
       ? `hsl(var(--background-hue), var(--background-saturation), calc(var(--background-lightness) - 50%))`
       : `hsl(var(--background-hue), var(--background-saturation), calc(var(--background-lightness) + 10%))`;
   });
+  const [statusUpdates, setStatusUpdates] = useState([]);
 
   useEffect(() => {
     const updateColors = () => {
@@ -106,6 +109,30 @@ function ClientV2Inner() {
       authRefreshInProgress.current = false;
     }
   }, [refreshAuth]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !userId || !previousLoginAt) return;
+
+    const shownKey = `status-updates-shown:${userId}:${lastLoginAt || 'unknown'}`;
+    if (sessionStorage.getItem(shownKey) === '1') return;
+
+    (async () => {
+      const groups = await fetchGroupedBookings(userId);
+      const since = new Date(previousLoginAt).getTime();
+
+      const updates = groups
+        .filter((g) => g.status_updated_at && new Date(g.status_updated_at).getTime() > since)
+        .map((g) => ({
+          grouped_booking_id: g.grouped_booking_id,
+          status: g.status,
+          status_updated_at: g.status_updated_at,
+        }))
+        .sort((a, b) => new Date(b.status_updated_at) - new Date(a.status_updated_at));
+
+      if(updates.length > 0) setStatusUpdates(updates);
+      sessionStorage.setItem(shownKey, '1');
+    })();
+  }, [isAuthenticated, userId, previousLoginAt, lastLoginAt]);
 
   // Clear navigation loading when location changes and auth check completes
   useEffect(() => {
@@ -716,6 +743,20 @@ function ClientV2Inner() {
           )}
         </div>
       </div>
+
+      {statusUpdates && (
+        <StatusUpdate 
+          updates={statusUpdates} 
+          onClose={() => setStatusUpdates([])} 
+        />
+      )}
+
+      {statusUpdates.length > 0 && (
+        <StatusUpdate 
+          updates={statusUpdates} 
+          onClose={() => setStatusUpdates([])} 
+        />
+      )}
 
       {authModal && (
         <AuthModal

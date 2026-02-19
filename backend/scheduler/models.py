@@ -28,6 +28,8 @@ class User(Base):
     email = Column(String(100), unique=True, nullable=True)
     password = Column(String(100), nullable=False)
     is_admin = Column(Boolean, default=False)
+    previous_login_at = Column(DateTime, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
 
     bookings = relationship("Booking", back_populates="user")
     topologies = relationship("Topology", back_populates="user")
@@ -36,7 +38,6 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
-
 
 
 # ============================================================================
@@ -83,6 +84,7 @@ class Booking(Base):
     comment = Column(Text, nullable=True)
     collaborators = Column(JSON, nullable=True, default=list)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    status_updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     # Point to InventoryDevice explicitly because "Device" alias might not be in registry
     device = relationship("Device", back_populates="bookings")

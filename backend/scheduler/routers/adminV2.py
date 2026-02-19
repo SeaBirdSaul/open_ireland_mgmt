@@ -262,7 +262,11 @@ def approve_bookings(payload: dict, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="booking_ids required")
 
     db.query(models.Booking).filter(models.Booking.booking_id.in_(booking_ids)).update(
-        {models.Booking.status: "CONFIRMED"}, synchronize_session=False
+        {
+            models.Booking.status: "CONFIRMED",
+            models.Booking.status_updated_at: datetime.now(),
+        }, 
+        synchronize_session=False
     )
     db.commit()
     return {"updated": booking_ids}
@@ -276,7 +280,11 @@ def decline_bookings(payload: dict, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="booking_ids required")
 
     db.query(models.Booking).filter(models.Booking.booking_id.in_(booking_ids)).update(
-        {models.Booking.status: "DECLINED"}, synchronize_session=False
+        {
+            models.Booking.status: "DECLINED", 
+            models.Booking.status_updated_at: datetime.now(),
+        }, 
+        synchronize_session=False
     )
     db.commit()
     return {"updated": booking_ids}

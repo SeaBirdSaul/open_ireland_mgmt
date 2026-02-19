@@ -260,6 +260,7 @@ def _create_collaborator_copies(
                 start_time=owner_booking.start_time,
                 end_time=owner_booking.end_time,
                 status=owner_booking.status,
+                status_updated_at = datetime.now(),
                 comment=owner_booking.comment,
                 collaborators=None,
             )
@@ -306,6 +307,7 @@ def _mark_slot_group_status(db: Session, owner_booking: models.Booking, status: 
     )
     for row in related:
         row.status = status
+        row.status_updated_at = datetime.now(),
 '''
     Parameters:
     - favorite: BookingFavorite model instance
@@ -450,6 +452,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         "username": user.username,
         "is_admin": bool(getattr(user, "is_admin", False)),
         "email": user.email,
+        "previous_login_at": user.previous_login_at.isoformat() if user.previous_login_at else None,
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
     }
 
 
@@ -581,7 +585,6 @@ def login_user(
     db: Session = Depends(get_db),
     request: Request = None,
 ):
-
     user = (
         db.query(models.User)
         .filter(models.User.username == login_data.username)
@@ -607,6 +610,11 @@ def login_user(
 
     if not password_valid:
         raise HTTPException(status_code=400, detail="Invalid username or password")
+    
+    now = datetime.now()
+    user.previous_login_at = user.last_login_at
+    user.last_login_at = now
+    db.commit()
 
     # Store the user_id in Session
     request.session["user_id"] = user.id
@@ -730,6 +738,7 @@ async def create_bookings(
                 end_time=b.end_time,
                 status=final_status,
                 comment=req.message,
+                status_updated_at = datetime.now(),
                 collaborators=collaborator_usernames
                 if collaborator_usernames
                 else None,
@@ -880,6 +889,7 @@ def cancel_booking(
     for record in related_bookings:
         if record.status != "CANCELLED":
             record.status = "CANCELLED"
+            record.status_updated_at = datetime.now()
             updated_booking_ids.append(record.booking_id)
 
     if updated_booking_ids:
@@ -1328,6 +1338,7 @@ def cancel_booking_group(
     for booking in bookings:
         if booking.status != "CANCELLED":
             booking.status = "CANCELLED"
+            booking.status_updated_at = datetime.now()
             updated_booking_ids.append(booking.booking_id)
 
     if updated_booking_ids:
@@ -1789,10 +1800,15 @@ def get_user_bookings(
                 "end_date": booking.end_time.date(),
                 "created_at": booking.created_at,
                 "statuses": set(),
+                "status_updated_at": booking.status_updated_at or booking.created_at,
                 "is_owner": is_owner,
                 "is_collaborator": is_collaborator,
             }
         group = groups[group_id]
+
+        booking_updated_at = booking.status_updated_at or booking.created_at
+        if booking_updated_at > group["status_updated_at"]:
+            group["status_updated_at"] = booking_updated_at
 
         if booking.start_time.date() < group["start_date"]:
             group["start_date"] = booking.start_time.date()
@@ -1878,6 +1894,7 @@ def get_user_bookings(
                 "end_date": group["end_date"].isoformat(),
                 "created_at": group["created_at"].isoformat(),
                 "status": derive_status(group["statuses"]),
+                "status_updated_at": group["status_updated_at"].isoformat(),
                 "devices": devices,
                 "device_count": len(devices),
                 "booking_ids": sorted(group["booking_ids"]),

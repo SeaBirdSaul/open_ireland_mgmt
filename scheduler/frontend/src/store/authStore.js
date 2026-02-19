@@ -17,6 +17,8 @@ const useAuthStore = create((set, get) => ({
   username: null,
   isAdmin: false,
   loading: true, // Initial loading state
+  previousLoginAt: null,
+  lastLoginAt: null,
 
   // Actions
   refreshAuth: async (retryCount = 0) => {
@@ -56,6 +58,8 @@ const useAuthStore = create((set, get) => ({
               username: null,
               isAdmin: false,
               loading: false,
+              previousLoginAt: null,
+              lastLoginAt: null,
             });
             return;
           }
@@ -89,6 +93,8 @@ const useAuthStore = create((set, get) => ({
           username: data.username,
           isAdmin: Boolean(data.is_admin),
           loading: false,
+          previousLoginAt: data.previous_login_at || null,
+          lastLoginAt: data.last_login_at || null,
         });
       } else {
         set({
@@ -97,6 +103,8 @@ const useAuthStore = create((set, get) => ({
           username: null,
           isAdmin: false,
           loading: false,
+          previousLoginAt: data.previous_login_at || null,
+          lastLoginAt: data.last_login_at || null,
         });
       }    
     }
@@ -135,6 +143,8 @@ const useAuthStore = create((set, get) => ({
       username: null,
       isAdmin: false,
       loading: false,
+      previousLoginAt: null,
+      lastLoginAt: null,
     });
   },
 
