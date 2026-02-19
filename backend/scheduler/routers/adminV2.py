@@ -304,9 +304,15 @@ def list_logs(request: Request, db: Session = Depends(get_db)):
     }
 
 @router.get("/devices")
-def get_devices(request: Request, db: Session = Depends(get_db)):
+def get_devices(request: Request, db: Session = Depends(get_db), status: str | None = None,):
     admin_required(request, db)
     output = db.query(models.Device)
+    if status:
+        normalized_status = status.strip().lower()
+        if normalized_status == "unavailable":
+            output = output.filter(func.lower(models.Device.status).in_(["offline", "unavailable"]))
+        else:
+            output = output.filter(func.lower(models.Device.status) == normalized_status)
     rows = output.all()
     return {
         "items": [

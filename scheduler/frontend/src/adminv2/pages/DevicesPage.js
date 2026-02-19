@@ -23,7 +23,7 @@ import { useToastContext } from '../../contexts/ToastContext';
 import { useAdminContext } from '../context/AdminContext';
 import { canEditDevices } from '../utils/permissions';
 
-const STATUS_OPTIONS = ['Available', 'Maintenance', 'Offline'];
+const STATUS_OPTIONS = ['Available', 'Maintenance', 'Unavailable'];
 
 export default function DevicesPage() {
   const [searchParams, setSearchParams] = useSearchParams();

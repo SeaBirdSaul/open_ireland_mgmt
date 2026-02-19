@@ -1847,8 +1847,10 @@ def get_user_bookings(
             return "DECLINED"
         if any(s == "EXPIRED" for s in upper_statuses):
             return "EXPIRED"
-        if any(s in {"PENDING", "CONFLICTING"} for s in upper_statuses):
+        if any(s in {"PENDING"} for s in upper_statuses):
             return "PENDING"
+        if any(s == "CONFLICTING" for s in upper_statuses):
+            return "CONFLICTING"
         if any(s in {"APPROVED", "CONFIRMED"} for s in upper_statuses):
             return "APPROVED"
         return next(iter(upper_statuses))
