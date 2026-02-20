@@ -50,7 +50,7 @@ from datetime import timedelta
 import uuid
 from zoneinfo import ZoneInfo
 
-from typing import List, Optional, Iterable
+from typing import List, Optional, Iterable, Any
 
 from backend.scheduler.routers.admin import router as admin_router
 from backend.scheduler.routers.adminV2 import router as admin_v2_router
@@ -643,6 +643,33 @@ def logout_user(request: Request, response: Response):
     response.delete_cookie("session_id")
     return response
 
+def record_logs(
+    db: Session,
+    *,
+    actor_id: Optional[int],
+    actor_role: Optional[str],
+    action: str,
+    entity_type: str,
+    entity_id: Optional[str] = None,
+    payload: Optional[dict[str, Any]] = None,
+    outcome: str,
+    message: Optional[str] = None,
+    created_at: Optional[datetime] = None,
+) -> models.AdminAuditLog:
+    row = models.AdminAuditLog(
+        actor_id = actor_id,            # the user id
+        actor_role = actor_role,        # the users role (Viewer/admin)
+        action = action,                # e.g. "submit_booking"
+        entity_type = entity_type,      # e.g. "booking"
+        entity_id = entity_id,          # booking id or something to link back to the effected action
+        payload = payload,              # e.g. device count/messages
+        outcome = outcome,              # success/failure
+        message = message,              # some message by the system (probably the response to a fail)
+    )
+    if created_at is not None:
+        row.created_at = created_at
+    db.add(row)
+    return row
 
 # ================ Bookings: Single & Multiple Time Slot ================
 '''
@@ -680,6 +707,8 @@ async def create_bookings(
 
     grouped_booking_id = req.grouped_booking_id or str(uuid.uuid4())
     count_inserted = 0
+    created_booking_ids: list[int] = []
+
     try:
         for b in req.bookings:
             # Use with_for_update to lock this recording
@@ -746,6 +775,7 @@ async def create_bookings(
             )
             db.add(new_booking)
             db.flush()
+            created_booking_ids.append(new_booking.booking_id)
 
             if final_status == "CONFLICTING":
                 _mark_slot_group_status(db, new_booking, "CONFLICTING")
@@ -793,10 +823,74 @@ async def create_bookings(
 
     except HTTPException as he:
         db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = req.user_id,
+                actor_role = "admin" if getattr(user, "is_admin", False) else "viewer",
+                action = "submit_booking",
+                entity_type = "booking",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "requested_slots": len(req.bookings or []),
+                    "collaborators": req.collaborators or [],
+                },
+                outcome = "failure",
+                message = f"Booking submsission failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for booking failure")
         raise he
     except Exception as e:
         db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = req.user_id,
+                actor_role = "admin" if getattr(user, "is_admin", False) else "viewer",
+                action = "submit_booking",
+                entity_type = "booking",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "requested_slots": len(req.bookings or []),
+                    "collaborators": req.collaborators or [],
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Booking submission failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for unexpected booking failure")
         raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = user.id,
+            actor_role = "admin" if getattr(user, "is_admin", False) else "viewer",
+            action = "submit_booking",
+            entity_type = "booking",
+            entity_id = str(created_booking_ids[0]) if created_booking_ids else None,
+            payload = {
+                "booking_ids": created_booking_ids,
+                "grouped_booking_id": grouped_booking_id,
+                "requested_slots": len(req.bookings),
+                "inserted_count": count_inserted,
+                "collaborators": collaborator_usernames,
+                "message": req.message,
+            },
+            outcome = "success",
+            message = f"Created {count_inserted} booking(s)",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for submit_bookings success")
 
     background_tasks.add_task(send_booking_created_notification, content)
 
@@ -871,49 +965,117 @@ def cancel_booking(
             status_code=403, detail="Only the booking owner can cancel this booking."
         )
 
-    related_bookings = (
-        db.query(models.Booking)
-        .filter(
-            models.Booking.grouped_booking_id == booking.grouped_booking_id,
-            models.Booking.device_id == booking.device_id,
-            models.Booking.start_time == booking.start_time,
-            models.Booking.end_time == booking.end_time,
+    acting_user = db.query(models.User).get(acting_user_id)
+    actor_role = "admin" if getattr(acting_user, "is_admin", False) else "viewer"
+    try: 
+        related_bookings = (
+            db.query(models.Booking)
+            .filter(
+                models.Booking.grouped_booking_id == booking.grouped_booking_id,
+                models.Booking.device_id == booking.device_id,
+                models.Booking.start_time == booking.start_time,
+                models.Booking.end_time == booking.end_time,
+            )
+            .all()
         )
-        .all()
-    )
 
-    if all(rb.status == "CANCELLED" for rb in related_bookings):
-        raise HTTPException(status_code=400, detail="Booking is already cancelled")
+        if all(rb.status == "CANCELLED" for rb in related_bookings):
+            raise HTTPException(status_code=400, detail="Booking is already cancelled")
 
-    updated_booking_ids: List[int] = []
-    for record in related_bookings:
-        if record.status != "CANCELLED":
-            record.status = "CANCELLED"
-            record.status_updated_at = datetime.now()
-            updated_booking_ids.append(record.booking_id)
+        updated_booking_ids: List[int] = []
+        for record in related_bookings:
+            if record.status != "CANCELLED":
+                record.status = "CANCELLED"
+                record.status_updated_at = datetime.now()
+                updated_booking_ids.append(record.booking_id)
 
-    if updated_booking_ids:
-        _delete_device_booking_rows(db, updated_booking_ids)
-    db.commit()
+        if updated_booking_ids:
+            _delete_device_booking_rows(db, updated_booking_ids)
+        db.commit()
 
-    # Then re-check the same time-slot of device, if there is only one booking, change it to be pending
-    overlapping = (
-        db.query(models.Booking)
-        .filter(
-            models.Booking.device_id == booking.device_id,
-            models.Booking.start_time < booking.end_time,
-            models.Booking.end_time > booking.start_time,
-            models.Booking.is_collaborator.is_(False),
-            models.Booking.status.notin_(["CANCELLED", "EXPIRED"]),
+        # Then re-check the same time-slot of device, if there is only one booking, change it to be pending
+        overlapping = (
+            db.query(models.Booking)
+            .filter(
+                models.Booking.device_id == booking.device_id,
+                models.Booking.start_time < booking.end_time,
+                models.Booking.end_time > booking.start_time,
+                models.Booking.is_collaborator.is_(False),
+                models.Booking.status.notin_(["CANCELLED", "EXPIRED"]),
+            )
+            .all()
         )
-        .all()
-    )
 
-    if len(overlapping) == 1:
-        remaining = overlapping[0]
-        if remaining.status == "CONFLICTING":
-            remaining.status = "PENDING"
+        downgraded_booking_id = None
+
+        if len(overlapping) == 1:
+            remaining = overlapping[0]
+            if remaining.status == "CONFLICTING":
+                remaining.status = "PENDING"
+                remaining.status_updated_at = datetime.now()
+                downgraded_booking_id = remaining.booking_id
+                db.commit()
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = acting_user_id,
+                actor_role = actor_role,
+                action = "cancel_booking",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "grouped_bookings_id": booking.grouped_booking_id,
+                    "device_id": booking.device_id,
+                },
+                outcome = "failure",
+                message = f"Cancel booking failed: {he.detail}",
+            )
             db.commit()
+        except Exception as e:
+            db.rollback()
+            try:
+                record_logs(
+                    db, 
+                    actor_id = acting_user_id,
+                    actor_role = actor_role,
+                    action = "cancel_booking",
+                    entity_type = "booking",
+                    entity_id = str(booking_id),
+                    payload = {
+                        "grouped_booking_id": booking.grouped_booking_id,
+                        "device_id": booking.device_id,
+                        "error": str(e),
+                    },
+                    outcome = "failure",
+                    message = "Cancel booking failed with unexpected error",
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("failed to write audit log for cancel_booking unexpected failure")
+            raise HTTPException(status_code = 500, detail = str(e))
+        try: 
+            record_logs(
+                db, 
+                actor_id = acting_user_id,
+                actor_role = actor_role,
+                action = "cancel_booking",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "grouped_booking_id": booking.grouped_booking_id,
+                    "cancelled_booking_ids": updated_booking_ids,
+                    "conflicting_downgraded_booking_id": downgraded_booking_id,
+                },
+                outcome = "success",
+                message = f"Cancelled {len(updated_booking_ids)} booking(s) in slot",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("failed to write audit log for cancel_booking success")
 
     return {"message": f"Booking {booking_id} has been cancelled"}
 
@@ -949,50 +1111,123 @@ def update_booking_collaborators(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found.")
 
-    owner_bookings = [b for b in bookings if not b.is_collaborator]
-    if not owner_bookings:
-        raise HTTPException(
-            status_code=400,
-            detail="Unable to update collaborators without owner bookings.",
-        )
+    actor_role = "admin" if getattr(owner, "is_admin", False) else "viewer"
 
-    for booking in owner_bookings:
-        if booking.user_id != payload.owner_id:
+    try:
+        owner_bookings = [b for b in bookings if not b.is_collaborator]
+        if not owner_bookings:
             raise HTTPException(
-                status_code=403,
-                detail="Only the booking owner can update collaborators.",
-            )
-        if booking.status and booking.status.upper() == "CANCELLED":
-            raise HTTPException(
-                status_code=400, detail="Cannot update a cancelled booking."
+                status_code=400,
+                detail="Unable to update collaborators without owner bookings.",
             )
 
-    collaborator_usernames, collaborator_users = _resolve_collaborators(
-        db, owner.username, payload.collaborators or []
-    )
+        for booking in owner_bookings:
+            if booking.user_id != payload.owner_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the booking owner can update collaborators.",
+                )
+            if booking.status and booking.status.upper() == "CANCELLED":
+                raise HTTPException(
+                    status_code=400, detail="Cannot update a cancelled booking."
+                )
 
-    for owner_booking in owner_bookings:
-        owner_booking.collaborators = (
-            collaborator_usernames if collaborator_usernames else None
+        collaborator_usernames, collaborator_users = _resolve_collaborators(
+            db, owner.username, payload.collaborators or []
         )
 
-        related_collaborators = _fetch_collaborator_rows_for_slot(db, owner_booking)
-        existing_map = {row.user_id: row for row in related_collaborators}
-        desired_ids = {user.id for user in collaborator_users}
+        for owner_booking in owner_bookings:
+            owner_booking.collaborators = (
+                collaborator_usernames if collaborator_usernames else None
+            )
 
-        for user_id, row in list(existing_map.items()):
-            if user_id not in desired_ids:
-                db.delete(row)
+            related_collaborators = _fetch_collaborator_rows_for_slot(db, owner_booking)
+            existing_map = {row.user_id: row for row in related_collaborators}
+            desired_ids = {user.id for user in collaborator_users}
 
-        missing_users = [
-            collaborator
-            for collaborator in collaborator_users
-            if collaborator.id not in existing_map
-        ]
-        if missing_users:
-            _create_collaborator_copies(db, owner_booking, missing_users)
+            for user_id, row in list(existing_map.items()):
+                if user_id not in desired_ids:
+                    db.delete(row)
 
-    db.commit()
+            missing_users = [
+                collaborator
+                for collaborator in collaborator_users
+                if collaborator.id not in existing_map
+            ]
+            if missing_users:
+                _create_collaborator_copies(db, owner_booking, missing_users)
+
+        db.commit()
+
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.owner_id,
+                actor_role = actor_role,
+                action = "update_booking_collaborators",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "owner_id": payload.owner_id,
+                    "collaborators": payload.collaborators or [],
+                },
+                outcome = "failure",
+                message = f"Update booking collaborators failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for update_booking_collaborators failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.owner_id,
+                actor_role = actor_role,
+                action = "update_booking_collaborators",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "owner_id": payload.owner_id,
+                    "collaborators": payload.collaborators or [],
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Update booking collaborators failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for update_booking_collaborators unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.owner_id,
+            actor_role = actor_role,
+            action = "update_booking_collaborators",
+            entity_type = "booking",
+            entity_id = str(booking_id),
+            payload = {
+                "booking_ids": target_ids,
+                "owner_id": payload.owner_id,
+                "collaborators": collaborator_usernames,
+            },
+            outcome = "success",
+            message = "Collaborators updated successfully.",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for update_booking_collaborators success")
 
     return {
         "message": "Collaborators updated successfully.",
@@ -1029,6 +1264,7 @@ def rebook_booking(
     requester = db.query(models.User).get(payload.user_id)
     if not requester:
         raise HTTPException(status_code=404, detail="Requesting user not found.")
+    actor_role = "admin" if getattr(requester, "is_admin", False) else "viewer"
 
     target_ids = payload.booking_ids or [booking_id]
     bookings = (
@@ -1149,9 +1385,76 @@ def rebook_booking(
             )
             background_tasks.add_task(send_booking_created_notification, content)
 
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "rebook_booking",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "start_date": payload.start_date.isoformat(),
+                    "end_date": payload.end_date.isoformat(),
+                },
+                outcome = "failure",
+                message = f"Rebook booking failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for rebook_booking failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "rebook_booking",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "start_date": payload.start_date.isoformat(),
+                    "end_date": payload.end_date.isoformat(),
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Rebook booking failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for rebook_booking unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "rebook_booking",
+            entity_type = "booking",
+            entity_id = str(booking_id),
+            payload = {
+                "booking_ids": target_ids,
+                "start_date": payload.start_date.isoformat(),
+                "end_date": payload.end_date.isoformat(),
+                "count": created,
+            },
+            outcome = "success",
+            message = f"Created {created} booking(s) successfully.",
+        )
+        db.commit()
     except Exception:
         db.rollback()
-        raise
+        logger.exception("Failed to write audit log for rebook_booking success")
 
     return {
         "message": f"Created {created} booking(s) successfully.",
@@ -1185,6 +1488,7 @@ def extend_booking(
     requester = db.query(models.User).get(payload.user_id)
     if not requester:
         raise HTTPException(status_code=404, detail="Requesting user not found.")
+    actor_role = "admin" if getattr(requester, "is_admin", False) else "viewer"
 
     target_ids = payload.booking_ids or [booking_id]
     bookings = (
@@ -1284,9 +1588,73 @@ def extend_booking(
             updated += 1
 
         db.commit()
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "extend_booking",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "new_end_date": payload.new_end_date.isoformat(),
+                },
+                outcome = "failure",
+                message = f"Extend booking failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for extend_booking failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "extend_booking",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "new_end_date": payload.new_end_date.isoformat(),
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Extend booking failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for extend_booking unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "extend_booking",
+            entity_type = "booking",
+            entity_id = str(booking_id),
+            payload = {
+                "booking_ids": target_ids,
+                "new_end_date": payload.new_end_date.isoformat(),
+                "count": updated,
+            },
+            outcome = "success",
+            message = f"Extended {updated} booking(s) successfully.",
+        )
+        db.commit()
     except Exception:
         db.rollback()
-        raise
+        logger.exception("Failed to write audit log for extend_booking success")
 
     return {
         "message": f"Extended {updated} booking(s) successfully.",
@@ -1333,17 +1701,88 @@ def cancel_booking_group(
             status_code=403,
             detail="Only the booking owner can cancel this booking group.",
         )
+    actor_user = db.query(models.User).get(payload.user_id)
+    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
 
-    updated_booking_ids: List[int] = []
-    for booking in bookings:
-        if booking.status != "CANCELLED":
-            booking.status = "CANCELLED"
-            booking.status_updated_at = datetime.now()
-            updated_booking_ids.append(booking.booking_id)
+    try:
+        updated_booking_ids: List[int] = []
+        for booking in bookings:
+            if booking.status != "CANCELLED":
+                booking.status = "CANCELLED"
+                booking.status_updated_at = datetime.now()
+                updated_booking_ids.append(booking.booking_id)
 
-    if updated_booking_ids:
-        _delete_device_booking_rows(db, updated_booking_ids)
-    db.commit()
+        if updated_booking_ids:
+            _delete_device_booking_rows(db, updated_booking_ids)
+        db.commit()
+
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "cancel_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "booking_ids": [b.booking_id for b in bookings],
+                    "grouped_booking_id": grouped_booking_id,
+                },
+                outcome = "failure",
+                message = f"Cancel booking group failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for cancel_booking_group failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "cancel_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "booking_ids": [b.booking_id for b in bookings],
+                    "grouped_booking_id": grouped_booking_id,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Cancel booking group failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for cancel_booking_group unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "cancel_booking_group",
+            entity_type = "booking",
+            entity_id = grouped_booking_id,
+            payload = {
+                "booking_ids": [b.booking_id for b in bookings],
+                "cancelled_booking_ids": updated_booking_ids,
+                "grouped_booking_id": grouped_booking_id,
+            },
+            outcome = "success",
+            message = f"Cancelled booking group {grouped_booking_id}.",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for cancel_booking_group success")
 
     return {
         "message": f"Cancelled booking group {grouped_booking_id}.",
@@ -1390,6 +1829,8 @@ def extend_booking_group(
             status_code=403,
             detail="Only the booking owner can extend this booking group.",
         )
+    actor_user = db.query(models.User).get(payload.user_id)
+    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
 
     owner_bookings = [b for b in all_bookings if not b.is_collaborator]
 
@@ -1479,9 +1920,73 @@ def extend_booking_group(
                 next_date += timedelta(days=1)
 
         db.commit()
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "extend_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "new_end_date": payload.new_end_date.isoformat(),
+                },
+                outcome = "failure",
+                message = f"Extend booking group failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for extend_booking_group failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "extend_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "new_end_date": payload.new_end_date.isoformat(),
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Extend booking group failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for extend_booking_group unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "extend_booking_group",
+            entity_type = "booking",
+            entity_id = grouped_booking_id,
+            payload = {
+                "grouped_booking_id": grouped_booking_id,
+                "new_end_date": payload.new_end_date.isoformat(),
+                "count": added,
+            },
+            outcome = "success",
+            message = f"Extended booking group {grouped_booking_id} by {added} slot(s).",
+        )
+        db.commit()
     except Exception:
         db.rollback()
-        raise
+        logger.exception("Failed to write audit log for extend_booking_group success")
 
     return {
         "message": f"Extended booking group {grouped_booking_id} by {added} slot(s).",
@@ -1531,6 +2036,8 @@ def rebook_booking_group(
             status_code=403,
             detail="Only the booking owner can rebook this booking group.",
         )
+    actor_user = db.query(models.User).get(payload.user_id)
+    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
 
     if payload.end_date < payload.start_date:
         raise HTTPException(
@@ -1636,9 +2143,77 @@ def rebook_booking_group(
             )
             background_tasks.add_task(send_booking_created_notification, content)
 
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "rebook_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "start_date": payload.start_date.isoformat(),
+                    "end_date": payload.end_date.isoformat(),
+                },
+                outcome = "failure",
+                message = f"Rebook booking group failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for rebook_booking_group failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "rebook_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "start_date": payload.start_date.isoformat(),
+                    "end_date": payload.end_date.isoformat(),
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Rebook booking group failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for rebook_booking_group unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "rebook_booking_group",
+            entity_type = "booking",
+            entity_id = new_grouped_id,
+            payload = {
+                "grouped_booking_id": grouped_booking_id,
+                "new_grouped_booking_id": new_grouped_id,
+                "start_date": payload.start_date.isoformat(),
+                "end_date": payload.end_date.isoformat(),
+                "count": created,
+            },
+            outcome = "success",
+            message = f"Created {created} booking(s) successfully.",
+        )
+        db.commit()
     except Exception:
         db.rollback()
-        raise
+        logger.exception("Failed to write audit log for rebook_booking_group success")
 
     return {
         "message": f"Created {created} booking(s) successfully.",
