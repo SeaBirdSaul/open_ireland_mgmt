@@ -56,11 +56,12 @@ def get_dashboard(request: Request, db: Session = Depends(get_db)):
         "total": db.query(models.Device).count(),
     }
     recent_activity = db.query(models.AdminAuditLog).order_by(models.AdminAuditLog.id.desc()).limit(5).all()
-
+    conflicting_count =(db.query(models.Booking).filter(models.Booking.status == "CONFLICTING").count())
     # Minimal shape expected by tests
     return {
         "cards": [
             {"id": "pending_approvals", "value": pending_count},
+            {"id": "active_conflicts", "value": conflicting_count},
             {"id": "active_devices", "value": device_counts["total"]},
             {"id": "recent_activity", "value": len(recent_activity)},
         ],
