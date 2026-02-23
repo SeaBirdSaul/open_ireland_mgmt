@@ -7,7 +7,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import usePersistentState from '../hooks/usePersistentState';
 import { useAdminContext } from '../context/AdminContext';
 import GlobalSearchBar from './GlobalSearchBar';
-import useDateRangeStore from '../state/useDateRangeStore';
+// import useDateRangeStore from '../state/useDateRangeStore';
 
 const Icon = {
   dashboard: (
@@ -82,8 +82,8 @@ function AdminLayout({ children }) {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem('darkMode') === 'true';
   });
-  const dateRange = useDateRangeStore((state) => state.getRange('global'));
-  const setDateRange = useDateRangeStore((state) => state.setRange);
+  // const dateRange = useDateRangeStore((state) => state.getRange('global'));
+  // const setDateRange = useDateRangeStore((state) => state.setRange);
 
   React.useEffect(() => {
     if (darkMode) {
@@ -103,62 +103,62 @@ function AdminLayout({ children }) {
     });
   }, [permissions]);
 
-  React.useEffect(() => {
-    if (!dateRange?.start || !dateRange?.end) {
-      const now = new Date();
-      const iso = now.toISOString().slice(0, 10);
-      setDateRange('global', {
-        start: iso,
-        end: iso,
-        preset: 'Today',
-      });
-    }
-  }, [dateRange, setDateRange]);
+  // React.useEffect(() => {
+  //   if (!dateRange?.start || !dateRange?.end) {
+  //     const now = new Date();
+  //     const iso = now.toISOString().slice(0, 10);
+  //     setDateRange('global', {
+  //       start: iso,
+  //       end: iso,
+  //       preset: 'Today',
+  //     });
+  //   }
+  // }, [dateRange, setDateRange]);
 
   const activeKey =
     availableNavItems.find((item) => location.pathname.startsWith(item.path))?.key || 'dashboard';
 
-  const presets = [
-    { key: 'today', label: 'Today' },
-    { key: 'week', label: 'This Week' },
-    { key: 'next-week', label: 'Next Week' },
-    { key: 'month', label: 'This Month' },
-  ];
+  // const presets = [
+  //   { key: 'today', label: 'Today' },
+  //   { key: 'week', label: 'This Week' },
+  //   { key: 'next-week', label: 'Next Week' },
+  //   { key: 'month', label: 'This Month' },
+  // ];
 
-  const handlePreset = (key) => {
-    const now = new Date();
-    const start = new Date(now);
-    const end = new Date(now);
+  // const handlePreset = (key) => {
+  //   const now = new Date();
+  //   const start = new Date(now);
+  //   const end = new Date(now);
 
-    switch (key) {
-      case 'week': {
-        const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
-        start.setDate(now.getDate() + diff);
-        end.setDate(start.getDate() + 6);
-        break;
-      }
-      case 'next-week': {
-        const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
-        start.setDate(now.getDate() + diff + 7);
-        end.setDate(start.getDate() + 6);
-        break;
-      }
-      case 'month': {
-        start.setDate(1);
-        end.setMonth(start.getMonth() + 1);
-        end.setDate(0);
-        break;
-      }
-      default:
-        break;
-    }
+  //   switch (key) {
+  //     case 'week': {
+  //       const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+  //       start.setDate(now.getDate() + diff);
+  //       end.setDate(start.getDate() + 6);
+  //       break;
+  //     }
+  //     case 'next-week': {
+  //       const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+  //       start.setDate(now.getDate() + diff + 7);
+  //       end.setDate(start.getDate() + 6);
+  //       break;
+  //     }
+  //     case 'month': {
+  //       start.setDate(1);
+  //       end.setMonth(start.getMonth() + 1);
+  //       end.setDate(0);
+  //       break;
+  //     }
+  //     default:
+  //       break;
+  //   }
 
-    setDateRange('global', {
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
-      preset: presets.find((preset) => preset.key === key)?.label ?? 'Custom',
-    });
-  };
+  //   setDateRange('global', {
+  //     start: start.toISOString().slice(0, 10),
+  //     end: end.toISOString().slice(0, 10),
+  //     preset: presets.find((preset) => preset.key === key)?.label ?? 'Custom',
+  //   });
+  // };
 
   return (
     <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
@@ -220,7 +220,7 @@ function AdminLayout({ children }) {
             </button>
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <GlobalSearchBar />
-              <div className="hidden sm:flex items-center gap-2">
+              {/* <div className="hidden sm:flex items-center gap-2">
                 {presets.map((preset) => {
                   const isActive = (dateRange?.preset || 'Today') === preset.label;
                   return (
@@ -242,7 +242,7 @@ function AdminLayout({ children }) {
               </div>
               <div className="hidden lg:flex text-xs text-slate-500 dark:text-slate-400">
                 {dateRange?.start ? `${dateRange.start} → ${dateRange.end}` : 'Date range · Custom'}
-              </div>
+              </div> */}
             </div>
             <div className="flex items-center gap-3">
               <button

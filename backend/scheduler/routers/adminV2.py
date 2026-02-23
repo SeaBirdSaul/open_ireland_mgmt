@@ -303,9 +303,12 @@ def list_logs(request: Request, db: Session = Depends(get_db)):
     return {
         "items": [
             {
+                "actor": db.query(models.User).get(r.actor_id),
                 "action": r.action,
                 "metadata": r.payload or {},
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                "entity": r.entity_id,
+                "outcome": r.outcome,
             }
             for r in rows
         ],

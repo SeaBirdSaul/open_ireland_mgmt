@@ -828,7 +828,7 @@ async def create_bookings(
                 db,
                 actor_id = req.user_id,
                 actor_role = "admin" if getattr(user, "is_admin", False) else "viewer",
-                action = "submit_booking",
+                action = "submit_bookings",
                 entity_type = "booking",
                 entity_id = None,
                 payload = {
@@ -851,7 +851,7 @@ async def create_bookings(
                 db,
                 actor_id = req.user_id,
                 actor_role = "admin" if getattr(user, "is_admin", False) else "viewer",
-                action = "submit_booking",
+                action = "submit_bookings",
                 entity_type = "booking",
                 entity_id = None,
                 payload = {
@@ -873,7 +873,7 @@ async def create_bookings(
             db,
             actor_id = user.id,
             actor_role = "admin" if getattr(user, "is_admin", False) else "viewer",
-            action = "submit_booking",
+            action = "submit_bookings",
             entity_type = "booking",
             entity_id = str(created_booking_ids[0]) if created_booking_ids else None,
             payload = {
@@ -1022,7 +1022,7 @@ def cancel_booking(
                 db,
                 actor_id = acting_user_id,
                 actor_role = actor_role,
-                action = "cancel_booking",
+                action = "cancel_bookings",
                 entity_type = "booking",
                 entity_id = str(booking_id),
                 payload = {
@@ -1040,7 +1040,7 @@ def cancel_booking(
                     db, 
                     actor_id = acting_user_id,
                     actor_role = actor_role,
-                    action = "cancel_booking",
+                    action = "cancel_bookings",
                     entity_type = "booking",
                     entity_id = str(booking_id),
                     payload = {
@@ -1061,7 +1061,7 @@ def cancel_booking(
                 db, 
                 actor_id = acting_user_id,
                 actor_role = actor_role,
-                action = "cancel_booking",
+                action = "cancel_bookings",
                 entity_type = "booking",
                 entity_id = str(booking_id),
                 payload = {
@@ -1392,7 +1392,7 @@ def rebook_booking(
                 db,
                 actor_id = payload.user_id,
                 actor_role = actor_role,
-                action = "rebook_booking",
+                action = "rebook_bookings",
                 entity_type = "booking",
                 entity_id = str(booking_id),
                 payload = {
@@ -1416,7 +1416,7 @@ def rebook_booking(
                 db,
                 actor_id = payload.user_id,
                 actor_role = actor_role,
-                action = "rebook_booking",
+                action = "rebook_bookings",
                 entity_type = "booking",
                 entity_id = str(booking_id),
                 payload = {
@@ -1439,7 +1439,7 @@ def rebook_booking(
             db,
             actor_id = payload.user_id,
             actor_role = actor_role,
-            action = "rebook_booking",
+            action = "rebook_bookings",
             entity_type = "booking",
             entity_id = str(booking_id),
             payload = {
@@ -1595,7 +1595,7 @@ def extend_booking(
                 db,
                 actor_id = payload.user_id,
                 actor_role = actor_role,
-                action = "extend_booking",
+                action = "extend_bookings",
                 entity_type = "booking",
                 entity_id = str(booking_id),
                 payload = {
@@ -1618,7 +1618,7 @@ def extend_booking(
                 db,
                 actor_id = payload.user_id,
                 actor_role = actor_role,
-                action = "extend_booking",
+                action = "extend_bookings",
                 entity_type = "booking",
                 entity_id = str(booking_id),
                 payload = {
@@ -1640,7 +1640,7 @@ def extend_booking(
             db,
             actor_id = payload.user_id,
             actor_role = actor_role,
-            action = "extend_booking",
+            action = "extend_bookings",
             entity_type = "booking",
             entity_id = str(booking_id),
             payload = {
@@ -2529,34 +2529,102 @@ def create_booking_favorite(
     user = db.query(models.User).get(payload.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    actor_role = "admin" if getattr(user, "is_admine", False) else "viewer"
 
-    name = (payload.name or "").strip() or datetime.utcnow().strftime("%Y-%m-%d")
-    existing = (
-        db.query(models.BookingFavorite)
-        .filter(
-            models.BookingFavorite.user_id == payload.user_id,
-            models.BookingFavorite.grouped_booking_id == payload.grouped_booking_id,
+    favorite = None
+    try:
+        name = (payload.name or "").strip() or datetime.utcnow().strftime("%Y-%m-%d")
+        existing = (
+            db.query(models.BookingFavorite)
+            .filter(
+                models.BookingFavorite.user_id == payload.user_id,
+                models.BookingFavorite.grouped_booking_id == payload.grouped_booking_id,
+            )
+            .first()
         )
-        .first()
-    )
 
-    if existing:
-        existing.name = name
-        existing.device_snapshot = payload.device_snapshot
-        existing.updated_at = datetime.utcnow()
-        db.commit()
-        db.refresh(existing)
-        favorite = existing
-    else:
-        favorite = models.BookingFavorite(
-            user_id=payload.user_id,
-            name=name,
-            grouped_booking_id=payload.grouped_booking_id,
-            device_snapshot=payload.device_snapshot,
+        if existing:
+            existing.name = name
+            existing.device_snapshot = payload.device_snapshot
+            existing.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(existing)
+            favorite = existing
+        else:
+            favorite = models.BookingFavorite(
+                user_id=payload.user_id,
+                name=name,
+                grouped_booking_id=payload.grouped_booking_id,
+                device_snapshot=payload.device_snapshot,
+            )
+            db.add(favorite)
+            db.commit()
+            db.refresh(favorite)
+        
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db, 
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "create_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": payload.grouped_booking_id,
+                    "name": payload.name,
+                },
+                outcome = "failure",
+                message = f"Created booking favorite failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for create_booking_favorite failure")
+        raise he
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "create_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": pauload.grouped_booking_id,
+                    "name": payload.name,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Create booking favorite failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for create_booking_favorite unexpected booking failure")
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user.id,
+            actor_role = actor_role,
+            action = "create_booking_favorite",
+            entity_type = "booking_favorite",
+            entity_id = str(favorite.id) if favorite else None,
+            payload = {
+                "grouped_booking_id": payload.grouped_booking_id,
+                "name": favorite.name if favorite else payload.name,
+            },
+            outcome = "success",
+            message = "Booking favorite saved successfully",
         )
-        db.add(favorite)
         db.commit()
-        db.refresh(favorite)
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for created_booking_favorite success")
 
     return _favorite_to_dict(favorite)
 
@@ -2581,14 +2649,79 @@ def update_booking_favorite(
     favorite = db.query(models.BookingFavorite).get(favorite_id)
     if not favorite:
         raise HTTPException(status_code=404, detail="Favorite not found")
+    actor_role = "admin" if getattr(favorite.user_id, "is_admin", False) else "viewer"
+    try:
+        if payload.name is not None:
+            name = payload.name.strip()
+            favorite.name = name or datetime.utcnow().strftime("%Y-%m-%d")
+        favorite.updated_at = datetime.utcnow()
 
-    if payload.name is not None:
-        name = payload.name.strip()
-        favorite.name = name or datetime.utcnow().strftime("%Y-%m-%d")
-    favorite.updated_at = datetime.utcnow()
-
-    db.commit()
-    db.refresh(favorite)
+        db.commit()
+        db.refresh(favorite)
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = favorite.user_id,
+                actor_role = actor_role,
+                action = "update_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": favorite.grouped_booking_id,
+                    "name": payload.name,
+                },
+                outcome = "failure",
+                message = f"Update booking favorite failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for update_booking_favorite failure")
+        raise he
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "update_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": payload.grouped_booking_id,
+                    "name": payload.name,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Update booking favorite failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for update_booking_favorite unexpected booking failure")
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = paylod.user_id,
+            actor_role = actor_role,
+            action = "update_booking_favorite",
+            entity_type = "booking_favorite",
+            entity_id = str(favorite.id) if favorite else None,
+            payload = {
+                "grouped_booking_id": payload.grouped_booking_id,
+                "name": favorite.name if favorite else payload.name,
+            },
+            outcome = "success",
+            message = f"Updated booking favorite successfully",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for update_booking_favorite success")
     return _favorite_to_dict(favorite)
 
 
@@ -2609,8 +2742,73 @@ def delete_booking_favorite(favorite_id: int, db: Session = Depends(get_db)):
     favorite = db.query(models.BookingFavorite).get(favorite_id)
     if not favorite:
         raise HTTPException(status_code=404, detail="Favorite not found")
-    db.delete(favorite)
-    db.commit()
+    actor_user = db.query(models.User).get(favorite.user_id)
+    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
+    actor_id = favorite.user_id
+    try:
+        db.delete(favorite)
+        db.commit()
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = actor_id,
+                actor_role = actor_role,
+                action = "delete_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = str(favorite_id),
+                payload = {
+                    "favorite_id": favorite_id,
+                },
+                outcome = "failure",
+                message = f"Delete booking favorite failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for delete_booking_favorite failure")
+        raise he
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = actor_id,
+                actor_role = actor_role,
+                action = "delete_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = str(favorite_id),
+                payload = {
+                    "favorite_id": favorite_id,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Delete booking favorite failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for unexpected delete_booking_favorite failure")
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = actor_id,
+            actor_role = actor_role,
+            action = "delete_booking_favorite",
+            entity_type = "booking_favorite",
+            entity_id = str(favorite_id),
+            payload = {
+                "favorite_id": favorite_id,
+            },
+            outcome = "success",
+            message = "Favorite removed",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for delete_booking_favorite success")
     return {"message": "Favorite removed"}
 
 
@@ -2633,23 +2831,93 @@ def delete_booking(booking_id: int, db: Session = Depends(get_db)):
     booking = db.query(models.Booking).get(booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found.")
-
-    related_bookings = (
-        db.query(models.Booking)
-        .filter(
-            models.Booking.grouped_booking_id == booking.grouped_booking_id,
-            models.Booking.device_id == booking.device_id,
-            models.Booking.start_time == booking.start_time,
-            models.Booking.end_time == booking.end_time,
+    actor_user = db.query(models.User).get(booking.user_id)
+    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
+    actor_id = booking.user_id
+    deleted_booking_ids: List[int] = []
+    try:
+        related_bookings = (
+            db.query(models.Booking)
+            .filter(
+                models.Booking.grouped_booking_id == booking.grouped_booking_id,
+                models.Booking.device_id == booking.device_id,
+                models.Booking.start_time == booking.start_time,
+                models.Booking.end_time == booking.end_time,
+            )
+            .all()
         )
-        .all()
-    )
-    if not related_bookings:
-        db.delete(booking)
-    else:
-        for record in related_bookings:
-            db.delete(record)
-    db.commit()
+        if not related_bookings:
+            db.delete(booking)
+        else:
+            for record in related_bookings:
+                db.delete(record)
+        db.commit()
+    
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = actor_id,
+                actor_role = actor_role,
+                action = "delete_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "grouped_booking_id": booking.grouped_booking_id,
+                    "device_id": booking.device_id,
+                },
+                outcome = "failure",
+                message = f"Delete booking failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for delete_booking failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = actor_id,
+                actor_role = actor_role,
+                action = "delete_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "grouped_booking_id": booking.grouped_booking_id,
+                    "device_id": booking.device_id,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Booking deletion failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for unexpected delete_booking failure")
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = actor_id,
+            actor_role = actor_user,
+            action = "delete_bookings",
+            entity_type = "booking",
+            entity_id = str(booking_id),
+            payload = {
+                "grouped_booking_id": booking.grouped_booking_id,
+                "deleted_booking_ids": deleted_booking_ids,
+            },
+            outcome = "success",
+            message = f"Booking {booking_id} deleted",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for delete_bookings success")
     return {"message": f"Booking {booking_id} deleted."}
 
 

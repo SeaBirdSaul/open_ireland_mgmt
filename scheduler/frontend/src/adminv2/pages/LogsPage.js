@@ -47,12 +47,12 @@ export default function LogsPage() {
       {
         key: 'timestamp',
         header: 'Time',
-        render: (row) => formatDateTime(row.timestamp),
+        render: (row) => formatDateTime(row.created_at),
       },
       {
         key: 'actor',
         header: 'Actor',
-        render: (row) => row.actor?.name || 'System',
+        render: (row) => row.actor?.name || row.actor?.username || row.actor || 'System',
       },
       {
         key: 'action',

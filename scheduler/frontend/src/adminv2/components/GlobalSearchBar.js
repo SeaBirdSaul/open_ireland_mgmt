@@ -154,7 +154,7 @@ function GlobalSearchBar() {
           /
         </kbd>
       </div>
-      <div className="flex items-center gap-2 mt-2">
+      {/* <div className="flex items-center gap-2 mt-2">
         {SEARCH_SCOPES.map((item) => (
           <button
             key={item}
@@ -170,7 +170,7 @@ function GlobalSearchBar() {
             {item.charAt(0).toUpperCase() + item.slice(1)}
           </button>
         ))}
-      </div>
+      </div> */}
       {isFocused && query && (
         <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-md shadow-lg max-h-80 overflow-y-auto z-40">
           {loading ? (
