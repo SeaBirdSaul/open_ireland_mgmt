@@ -449,23 +449,21 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                     }
                 }
 
+                const collaborators = bookingInfo?.collaborators || [];
+                if (
+                    currentUserLower &&
+                    collaborators.some(
+                        (name) => typeof name === 'string' && name.toLowerCase() === currentUserLower)
+                ) {
+                    if (CONFIRMED_BOOKING_STATUSES.has(statusKey)) {
+                        return 'ownedConfirmed';
+                    }
+                    if (PENDING_BOOKING_STATUSES.has(statusKey)) {
+                        return 'ownedPending';
+                    }
+                }
                 if (CONFIRMED_BOOKING_STATUSES.has(statusKey)) return 'bookedConfirmed';
                 if (PENDING_BOOKING_STATUSES.has(statusKey)) return 'bookedPending';
-
-                // const collaborators = bookingInfo?.collaborators || [];
-                // if (
-                //     currentUserLower &&
-                //     collaborators.some(
-                //         (name) => typeof name === 'string' && name.toLowerCase() === currentUserLower
-                //     )
-                // ) {
-                //     if (CONFIRMED_BOOKING_STATUSES.has(statusKey)) {
-                //         return 'ownedConfirmed';
-                //     }
-                //     if (PENDING_BOOKING_STATUSES.has(statusKey)) {
-                //         return 'ownedPending';
-                //     }
-                // }
 
                 return 'booked';
                 }

@@ -250,6 +250,8 @@ def _create_collaborator_copies(
     collaborator_users: List[models.User],
 ) -> int:
     created = 0
+    owner_user = db.get(models.User, owner_booking.user_id)
+    owner_username = owner_user.username if owner_user else None
     for collaborator in collaborator_users:
         db.add(
             models.Booking(
@@ -262,7 +264,7 @@ def _create_collaborator_copies(
                 status=owner_booking.status,
                 status_updated_at = datetime.now(),
                 comment=owner_booking.comment,
-                collaborators=None,
+                collaborators=f"OG Booker {owner_username}",
             )
         )
         created += 1
