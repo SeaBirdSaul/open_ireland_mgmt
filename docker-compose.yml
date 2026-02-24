@@ -10,7 +10,7 @@ services:
       - BACKEND_PORT=20001
       - FRONTEND_URL=http://localhost:25002
       - DEBUG=True
-      - DATABASE_URL=mysql+pymysql://local_user:password@127.0.0.1:23306/provdb_test
+      - DATABASE_URL=mysql+pymysql://local_user:password@127.0.0.1:13306/provdb_test
     volumes:
       - ./backend:/app/backend
     network_mode: "host"

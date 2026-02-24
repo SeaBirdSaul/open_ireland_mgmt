@@ -5,7 +5,7 @@
  * Implements bulk selection of users for efficient management.
  * Supports inviting new users and updating user roles and statuses.
  */
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { fetchUsers, inviteUser, updateUserRole, updateUserStatus } from '../api';
@@ -24,6 +24,17 @@ const ROLE_TABS = [
 ];
 
 export default function UsersPage() {
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [inviteForm, setInviteForm] = useState({
+    email: '',
+    handle: '',
+    role: '',
+    firstName: '',
+    lastName: '',
+    department: '',
+    note: '',
+  });
+
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToastContext();
   const queryClient = useQueryClient();
@@ -42,11 +53,42 @@ export default function UsersPage() {
 
   const inviteMutation = useMutation({
     mutationFn: (payload) => inviteUser(payload),
-    onSuccess: () => {
-      toast.success('Invitation created.');
+    onSuccess: async () => {
+      setIsInviteOpen(false);
+      setInviteForm({ email: '', handle: '', role: 'Viewer', firstName: '', lastName: '', department: '', note: '' });
+      await queryClient.invalidateQueries({ queryKey: ['admin-users'] });
     },
     onError: (err) => toast.error(err?.message || 'Unable to send invitation.'),
   });
+
+  const handleInviteSubmit = () => {
+    inviteMutation.mutate(
+      {
+        email: inviteForm.email.trim(),
+        handle: inviteForm.handle.trim() || undefined,
+        role: inviteForm.role,
+      },
+      {
+        onSuccess: async () => {
+          toast.success('Invitation created.');
+          setIsInviteOpen(false);
+          setInviteForm({
+            email: '',
+            handle: '',
+            role: '',
+            firstName: '',
+            lastName: '',
+            department: '',
+            note: '',
+          });
+          await queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+        },
+        onError: (err) => {
+          toast.error(err?.message || 'Unable to send invitation.');
+        }
+      }
+    );
+  };
 
   const roleMutation = useMutation({
     mutationFn: ({ userId, newRole }) => updateUserRole(userId, { role: newRole }),
@@ -158,13 +200,9 @@ export default function UsersPage() {
         {canEditUsers(permissions) && (
           <button
             type="button"
-            onClick={() => {
-              const email = window.prompt('Enter email or handle to invite:');
-              if (!email) return;
-              const roleInput = window.prompt('Assign role (Super Admin, Admin, Approver, Viewer):', 'Viewer');
-              if (!roleInput) return;
-              inviteMutation.mutate({ email, role: roleInput });
-            }}
+            onClick={() => 
+              setIsInviteOpen(true)
+            }
             className="px-3 py-2 text-sm font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700"
           >
             Invite user
@@ -222,4 +260,3 @@ export default function UsersPage() {
     </div>
   );
 }
-
