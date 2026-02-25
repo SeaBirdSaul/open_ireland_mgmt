@@ -135,7 +135,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://.*:(25001|25002|3000|3001)",  # Allow any hostname on these ports
+    allow_origin_regex=r"http://.*:(25001|25002|25003|3000|3001|35202|35203)",  # Allow any hostname on these ports
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

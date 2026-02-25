@@ -29,7 +29,7 @@ export default function Modal({
     >
       <div 
         className={clsx(
-          'bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full mx-4',
+          'bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full mx-4 max-h-[calc(100vh-2rem)] flex flex-col',
           sizeClasses[size]
         )}
         onClick={(e) => e.stopPropagation()}
@@ -46,7 +46,7 @@ export default function Modal({
             </button>
           </div>
         )}
-        <div className="px-6 py-4">
+        <div className="px-6 py-4 overflow-y-auto">
           {children}
         </div>
         {footer && (

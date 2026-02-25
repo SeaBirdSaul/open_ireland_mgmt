@@ -15,6 +15,8 @@ import { useToastContext } from '../../contexts/ToastContext';
 import { useAdminContext } from '../context/AdminContext';
 import { canEditUsers } from '../utils/permissions';
 import useBulkSelection from '../hooks/useBulkSelection';
+import InviteUserModal from '../components/InviteUserModal';
+import Modal from '../../admin/components/Modal';
 
 const ROLE_TABS = [
   { key: '', label: 'All users' },
@@ -23,17 +25,19 @@ const ROLE_TABS = [
   { key: 'Viewer', label: 'Viewers' },
 ];
 
+const emptyInviteForm = {
+  email: '',
+  handle: '',
+  role: 'Viewer',
+  firstName: '',
+  lastName: '',
+  password: '',
+  note: '',
+};
+
 export default function UsersPage() {
   const [isInviteOpen, setIsInviteOpen] = useState(false);
-  const [inviteForm, setInviteForm] = useState({
-    email: '',
-    handle: '',
-    role: '',
-    firstName: '',
-    lastName: '',
-    department: '',
-    note: '',
-  });
+  const [inviteForm, setInviteForm] = useState(emptyInviteForm);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToastContext();
@@ -54,40 +58,20 @@ export default function UsersPage() {
   const inviteMutation = useMutation({
     mutationFn: (payload) => inviteUser(payload),
     onSuccess: async () => {
+      toast.success('Invitation created.');
       setIsInviteOpen(false);
-      setInviteForm({ email: '', handle: '', role: 'Viewer', firstName: '', lastName: '', department: '', note: '' });
+      setInviteForm(emptyInviteForm);
       await queryClient.invalidateQueries({ queryKey: ['admin-users'] });
     },
     onError: (err) => toast.error(err?.message || 'Unable to send invitation.'),
   });
 
   const handleInviteSubmit = () => {
-    inviteMutation.mutate(
-      {
-        email: inviteForm.email.trim(),
-        handle: inviteForm.handle.trim() || undefined,
-        role: inviteForm.role,
-      },
-      {
-        onSuccess: async () => {
-          toast.success('Invitation created.');
-          setIsInviteOpen(false);
-          setInviteForm({
-            email: '',
-            handle: '',
-            role: '',
-            firstName: '',
-            lastName: '',
-            department: '',
-            note: '',
-          });
-          await queryClient.invalidateQueries({ queryKey: ['admin-users'] });
-        },
-        onError: (err) => {
-          toast.error(err?.message || 'Unable to send invitation.');
-        }
-      }
-    );
+    inviteMutation.mutate({
+      email: inviteForm.email.trim(),
+      handle: inviteForm.handle.trim() || undefined,
+      role: inviteForm.role,
+    });
   };
 
   const roleMutation = useMutation({
@@ -257,6 +241,24 @@ export default function UsersPage() {
         }
         loading={usersQuery.status === 'pending'}
       />
+      <Modal isOpen={isInviteOpen} 
+      onClose={() => {
+        setIsInviteOpen(false);
+        setInviteForm(emptyInviteForm);
+      }} 
+      title="Invite User" 
+      size="lg">
+        <InviteUserModal
+          form={inviteForm}
+          setForm={setInviteForm}
+          onSubmit={handleInviteSubmit}
+          onCancel={() => {
+            setIsInviteOpen(false);
+            setInviteForm(emptyInviteForm);
+          }}
+          isSubmitting={inviteMutation.status === 'pending'}
+        />
+      </Modal>
     </div>
   );
 }
