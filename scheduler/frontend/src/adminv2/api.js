@@ -203,3 +203,6 @@ export function globalSearch(params = {}) {
   return adminRequest(`/admin/v2/search?${searchParams.toString()}`, { method: 'GET' });
 }
 
+export function fetchBookingGroupDetail(groupId) {
+  return adminRequest(`/admin/v2/bookings/group/${groupId}`, { method: 'GET' });
+}

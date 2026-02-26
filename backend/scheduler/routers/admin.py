@@ -65,7 +65,7 @@ def login_user(login_data: schemas.UserLogin, db: Session = Depends(get_db), req
     if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(status_code=400, detail="Invalid username or password")
     # Check if user account is active
-    if (usre.status or "").lower() != "active":
+    if (user.status or "").lower() != "active":
         raise HTTPException(status_code=403, detail="Account is inactive")
     request.session["user_id"] = user.id
     return {

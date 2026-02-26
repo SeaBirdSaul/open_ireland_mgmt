@@ -617,7 +617,7 @@ def login_user(
     if not password_valid:
         raise HTTPException(status_code=400, detail="Invalid username or password")
     
-    if (usre.status or "").lower() != "active":
+    if (user.status or "").lower() != "active":
         raise HTTPException(status_code=403, detail="Account is inactive")
     now = datetime.now()
     user.previous_login_at = user.last_login_at

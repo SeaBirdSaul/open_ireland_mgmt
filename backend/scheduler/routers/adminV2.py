@@ -151,6 +151,7 @@ def list_bookings(
         "items": [
             {
                 "booking_id": b.booking_id,
+                "grouped_booking_id": b.grouped_booking_id,
                 "status": b.status,
                 "start_time": b.start_time.isoformat() if b.start_time else None,
                 "end_time": b.end_time.isoformat() if b.end_time else None,
@@ -455,3 +456,45 @@ def update_user_status(user_id: int, payload: schemas.AdminUserStatusUpdateReque
     db.commit()
 
     return {"user_id": user_id, "status": role_row.status}
+
+@router.get("/bookings/group/{group_id}")
+def get_booking_group_details(group_id: str, request: Request, db: Session = Depends(get_db)):
+    admin_required(request, db)
+
+    rows = (
+        db.query(models.Booking)
+        .filer(models.Booking.grouped_booking_id == group_id)
+        .order_by(models.Booking.start_time.asc())
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status=404, detail="Booking group not found")
+
+    lead = rows[0]
+    return {
+        "grouped_booking_id": group_id,
+        "bookings": [
+            {
+                "booking_id": b.booking_id,
+                "status": b.status,
+                "start_time": b.start_time.isoformat() if b.start_time else None,
+                "end_time": b.end_time.isoformat() if b.end_time else None,
+                "comment": b.comment,
+                "user": {
+                    "id": b.user.id if b.user else None,
+                    "username": b.user.username if b.user else "Unknown",
+                },
+                "device": {
+                    "id": b.device.id if b.device else None,
+                    "name": b.device.deviceName if b.device else "Unknown",
+                    "type": b.device.deviceType if b.device else "Unknown",
+                },
+            }
+            for b in rows
+        ],
+        "summary": {
+            "statuses": sorted({b.status for b in rows}),
+            "count": len(rows),
+            "lead_booking_id": lead.booking_id,
+        },
+    }

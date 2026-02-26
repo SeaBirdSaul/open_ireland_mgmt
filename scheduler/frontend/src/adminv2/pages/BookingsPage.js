@@ -69,7 +69,7 @@ export default function BookingsPage() {
     end: null,
     preset: 'This Week',
   });
-  const focusedBookingId = searchParams.get('focus');
+  const focusedGroupId = searchParams.get('focus_group');
   const conflictResolutionId1 = searchParams.get('resolve-id-1');
   const conflictResolutionId2 = searchParams.get('resolve-id-2');
 
@@ -98,7 +98,64 @@ export default function BookingsPage() {
     keepPreviousData: true,
   });
 
-  const selection = useBulkSelection(bookingsQuery.data?.items || [], (row) => row.booking_id);
+  const TERMINAL_STATUSES = new Set(['CANCELLED', 'REJECTED', 'DECLINED', 'CONFIRMED', 'APPROVED', 'EXPIRED']);
+
+  function toDisplayStatus(statuses = []){
+    const normalized = statuses.map((s) => String(s || '').toUpperCase());
+
+    if (normalized.includes('CONFLICTING')){
+      return 'CONFLICTING';
+    }
+
+    const allTerminal = normalized.length > 0 && normalized.every((s) => TERMINAL_STATUSES.has(s));
+    
+    if (allTerminal) {
+      const uniq = [...new Set(normalized)];
+      if (uniq.length === 1) {
+        const s = uniq[0];
+        if (s === 'DECLINED' || s === 'REJECTED') return 'REJECTED';
+        else if (s === 'CONFIRMED' || s === 'APPROVED') return 'APPROVED';
+        else if (s === 'CANCELLED') return 'CANCELLED';
+        else if (s === 'EXPIRED') return 'EXPIRED';
+      }
+
+      else if (uniq.includes('CANCELLED')) return 'CANCELLED';
+      else if (uniq.includes('DECLINED') || uniq.includes('REJECTED')) return 'REJECTED';
+      else if (uniq.includes('EXPIRED')) return 'EXPIRED';
+      else return 'APPROVED';
+    }
+    
+    return 'PENDING';
+  }
+
+  const groupedRows = useMemo(() => {
+    const byGroup = new Map();
+    (bookingsQuery.data?.items || []).forEach((b) => {
+      const key = b.grouped_booking_id || `single-${b.booking_id}`;
+      if (!byGroup.has(key)) byGroup.set(key, []);
+      byGroup.get(key).push(b);
+    });
+
+    return Array.from(byGroup.entries()).map(([grouped_booking_id, items]) => {
+      const sorted = [...items].sort((a,b) => new Date(a.start_time) - new Date(b.start_time));
+      const statuses = [...new Set(sorted.map((x) => x.status))];
+      return{
+        grouped_booking_id,
+        count: sorted.length,
+        booking_ids: sorted.map((x) => x.booking_id),
+        statuses: statuses,
+        displayStatus: toDisplayStatus(statuses),
+        first: sorted[0],
+        last: sorted[sorted.length - 1],
+        owner: sorted[0]?.user,
+        deviceTypes: [...new Set(sorted.map((x) => x.device?.type).filter(Boolean))],
+        raw: sorted,
+      };
+    });
+  }, [bookingsQuery.data]);
+
+  // const selection = useBulkSelection(bookingsQuery.data?.items || [], (row) => row.booking_id);
+  const selection = useBulkSelection(groupedRows, (row) => row.grouped_booking_id);
 
   const approveMutation = useMutation({
     mutationFn: (payload) => approveBookings(payload),
@@ -131,55 +188,65 @@ export default function BookingsPage() {
   // });
 
   const handleBulkApprove = () => {
-    const ids = Array.from(selection.state.ids);
-    approveMutation.mutate({ booking_ids: ids });
+    approveMutation.mutate({ booking_ids: selectedBookingIds });
   };
 
   const handleBulkDecline = () => {
-    const ids = Array.from(selection.state.ids);
-    declineMutation.mutate({ booking_ids: ids });
+    declineMutation.mutate({ booking_ids: selectedBookingIds });
   };
 
   const handleResolveConflicts = () => {
-    const ids = Array.from(selection.state.ids);
-
-    if (ids.length === 2){
+    if (selectedBookingIds.length === 2){
       const next = new URLSearchParams(searchParams);
-      next.set('resolve-id-1', ids[0]);
-      next.set('resolve-id-2', ids[1]);
+      next.set('resolve-id-1', String(selectedBookingIds[0]));
+      next.set('resolve-id-2', String(selectedBookingIds[1]));
       setSearchParams(next, { replace: true });
-    } else if (ids.length > 2){
+    } else if (selectedBookingIds.length > 2){
       toast.error('Select exactly 2 conflicting bookings to compare and resolve.');
-    } else if (ids.length === 1){
+    } else if (selectedBookingIds.length === 1){
       toast.error('Select at least 2 bookings to resolve conflicts.');
     }
   };
 
+  const selectedBookingIds = useMemo(() => {
+    const selectedGroupIds = selection.state.ids;
+    return groupedRows
+      .filter((row) => selectedGroupIds.has(row.grouped_booking_id))
+      .flatMap((row) => row.booking_ids);
+  }, [selection.state.ids, groupedRows]);
+
   const columns = useMemo(
     () => [
       {
-        key: 'booking_id',
-        header: 'Booking ID',
-        accessor: (row) => row.booking_id,
+        key: 'grouped_booking_id',
+        header: 'Group ID',
+        accessor: (row) => row.grouped_booking_id,
         className: 'font-mono text-xs text-gray-500 dark:text-gray-400',
       },
       {
         key: 'user',
         header: 'User',
-        render: (row) => (
-          <div>
-            <div className="font-medium text-gray-800 dark:text-gray-100">{row.user.username}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">#{row.user.id}</div>
-          </div>
-        ),
+        render: (row) => {
+          const user = row.owner || row.first?.user;
+          return (
+            <div> 
+              <div className="font-medium text-gray-800 dark:text-gray-100">{user?.username || 'Unknown'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {user?.id ? `#${user.id}` : '-'} · {row.count} booking{row.count === 1 ? '' : 's'}
+              </div>
+            </div>
+          );
+        },
       },
       {
         key: 'device',
         header: 'Device',
         render: (row) => (
           <div>
-            <div className="font-medium text-gray-800 dark:text-gray-100">{row.device.name}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">{row.device.type}</div>
+            <div className="font-medium text-gray-800 dark:text-gray-100">{row.first?.device?.name || 'Mixed'}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              {row.deviceTypes?.length ? row.deviceTypes.join(', ') : '-'}
+            </div>
           </div>
         ),
       },
@@ -188,28 +255,35 @@ export default function BookingsPage() {
         header: 'Time window',
         render: (row) => (
           <div className="text-sm text-gray-700 dark:text-gray-200">
-            <div>{formatDateTime(row.start_time)}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(row.end_time)}</div>
+            <div>{formatDateTime(row.first?.start_time)}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(row.last?.end_time)}</div>
           </div>
         ),
       },
       {
-        key: 'status',
+        key: 'displayStatus',
         header: 'Status',
         render: (row) => {
-          const status = row.status || 'PENDING';
-          const badgeClasses =
-            status === 'CONFIRMED'
-              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
-              : status === 'DECLINED'
-              ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200'
-              : status === 'CONFLICTING'
+          const s = row.displayStatus;
+          const badge = 
+            s === 'CONFLICTING'
               ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200'
-              : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200';
+              : s === 'APPROVED'
+              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+              : s === 'REJECTED'
+              ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200'
+              : s === 'CANCELLED'
+              ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'
+              : s === 'EXPIRED'
+              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200'
+              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'; // Pending
+
           return (
-            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${badgeClasses}`}>
-              {status}
-            </span>
+            <div className="flex flex-wrap gap-1">
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${badge}`}>
+                {s}
+              </span>
+            </div>
           );
         },
       },
@@ -218,7 +292,7 @@ export default function BookingsPage() {
         header: 'Notes',
         render: (row) => (
           <div className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-xs">
-            {row.comment || '—'}
+            {row.first?.comment || '—'}
           </div>
         ),
       },
@@ -289,7 +363,7 @@ export default function BookingsPage() {
   const bulkActions = (selectionState) => {
     const disabled = selectionState.count === 0;
     const hasCancelledBooking = selection.selectedRows.some(
-      (row) => row.status === 'CANCELLED'
+      (row) => row.statuses?.includes('CANCELLED')
     );
     return (
       <div className="flex items-center gap-2">
@@ -338,13 +412,13 @@ export default function BookingsPage() {
     }
 
     const next = new URLSearchParams(searchParams);
-    next.set('focus', row.booking_id);
+    next.set('focus_group', row.grouped_booking_id);
     setSearchParams(next, { replace: true });
   };
 
   const handleCloseDrawer = () => {
     const next = new URLSearchParams(searchParams);
-    next.delete('focus');
+    next.delete('focus_group');
     setSearchParams(next, { replace: true });
   };
 
@@ -416,18 +490,18 @@ export default function BookingsPage() {
       />
 
       <DataTable
-        rows={bookingsQuery.data?.items || []}
+        rows={groupedRows}
         columns={columns}
         selection={canEditBookings(permissions) ? selection : null}
         bulkActions={canEditBookings(permissions) ? bulkActions : null}
         loading={bookingsQuery.status === 'pending'}
         onRowClick={canEditBookings(permissions) ? handleRowClick : undefined}
-        rowId={(row) => row.booking_id}
+        rowId={(row) => row.grouped_booking_id}
       />
 
       <BookingDetailDrawer
-        bookingId={focusedBookingId}
-        open={Boolean(focusedBookingId)}
+        bookingId={focusedGroupId}
+        open={Boolean(focusedGroupId)}
         onClose={handleCloseDrawer}
       />
       <ConflictResolutionModal
