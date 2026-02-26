@@ -71,6 +71,10 @@ export default function UsersPage() {
       email: inviteForm.email.trim(),
       handle: inviteForm.handle.trim() || undefined,
       role: inviteForm.role,
+      firstName: inviteForm.firstName.trim(),
+      lastName: inviteForm.lastName.trim(),
+      password: inviteForm.password,
+      notes: inviteForm.note?.trim() || undefined,
     });
   };
 

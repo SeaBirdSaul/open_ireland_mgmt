@@ -42,8 +42,9 @@ def admin_register(admin: schemas.AdminCreate, db: Session = Depends(get_db), re
         username=admin.username,
         email=admin.email,
         password=hashed_pass,
-        is_admin=True,  # Mark this user as admin
-        discord_id=admin.discord_id
+        role = 'admin',  # Mark this user as admin
+        discord_id=admin.discord_id,
+        status="active",
     )
     db.add(new_user)
     db.commit()
@@ -63,12 +64,14 @@ def login_user(login_data: schemas.UserLogin, db: Session = Depends(get_db), req
     # Check if the user exists and required information is correct
     if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(status_code=400, detail="Invalid username or password")
-    
+    # Check if user account is active
+    if (usre.status or "").lower() != "active":
+        raise HTTPException(status_code=403, detail="Account is inactive")
     request.session["user_id"] = user.id
     return {
         "message": "Sign in successful",
         "user_id": user.id,
-        "is_admin": user.is_admin
+        "role": user.role
     }
 
 
@@ -80,8 +83,12 @@ def admin_required(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     user = db.query(models.User).get(user_id)
-    if not user or not getattr(user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="Admin privileges required")
+    if not user:
+        raise HTTPException(status=403, detail="Admin privileges required")
+    if (user.status or "").lower() != "active":
+        raise HTTPException(status=403, detail="Account is inactive")
+    if (user.role or "").lower() not in {"admin", "super admin"}:
+        raise HTTPException(status=403, detail="Admin privileges required")
     
 @router.get("/checkAdminSession")
 def get_session(request: Request, db: Session = Depends(get_db)):
@@ -90,7 +97,7 @@ def get_session(request: Request, db: Session = Depends(get_db)):
     if user_id:
         user = db.query(models.User).get(user_id)
         if user:
-            return {"logged_in": True, "user_id": user.id, "username": user.username, "is_admin": user.is_admin}
+            return {"logged_in": True, "user_id": user.id, "username": user.username, "role": user.role}
     return {"logged_in": False}
 
 

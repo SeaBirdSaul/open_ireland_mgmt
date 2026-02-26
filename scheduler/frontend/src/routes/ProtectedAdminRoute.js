@@ -14,7 +14,7 @@ import AccessDeniedPage from '../admin/pages/AccessDeniedPage';
  * Note: Non-authenticated users are still redirected to /client
  */
 export default function ProtectedAdminRoute({ children }) {
-  const { authenticated, isAdmin, loading } = useAuthStore();
+  const { authenticated, role, loading } = useAuthStore();
 
   // Show loading state while checking auth
   if (loading) {
@@ -34,7 +34,7 @@ export default function ProtectedAdminRoute({ children }) {
   }
 
   // Authenticated but not admin - show access denied page
-  if (!isAdmin) {
+  if (role !== "admin" || role !== "super admin") {
     return <AccessDeniedPage />;
   }
 

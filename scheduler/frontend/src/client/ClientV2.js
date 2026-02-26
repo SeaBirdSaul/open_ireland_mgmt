@@ -34,7 +34,7 @@ function ClientV2Inner() {
   const location = useLocation();
 
   // Use centralized auth store
-  const { authenticated, userId, username: userName, isAdmin, loading: isCheckingAuth, refreshAuth, clearAuth, previousLoginAt, lastLoginAt } = useAuthStore();
+  const { authenticated, userId, username: userName, role, loading: isCheckingAuth, refreshAuth, clearAuth, previousLoginAt, lastLoginAt } = useAuthStore();
   
   // Use ref to track if auth refresh is in progress to prevent race conditions
   const authRefreshInProgress = useRef(false);
@@ -377,7 +377,7 @@ function ClientV2Inner() {
           // Use setTimeout to ensure state is updated
           setTimeout(() => {
             const authState = useAuthStore.getState();
-            if (authState.isAdmin) {
+            if (authState.role) {
               toast.info('You\'re an admin. Use the Admin button in the header to open the admin panel.');
             }
           }, 100);
@@ -567,21 +567,21 @@ function ClientV2Inner() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (isAdmin) {
+                        if (role === "admin" || role === "super admin") {
                           setIsNavigating(true);
                           navigate('/admin');
                         } else {
                           toast.error('Admin access required');
                         }
                       }}
-                      disabled={!isAdmin || isNavigating}
-                      title={isAdmin ? 'Open Admin Panel' : 'Admin access required'}
+                      disabled={(role !== "admin" && role !== "super admin") || isNavigating}
+                      title={(role === "admin" || role === "super admin") ? 'Open Admin Panel' : 'Admin access required'}
                       className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                        isAdmin
+                        (role === "admin" || role === "super admin")
                           ? 'text-white hover:opacity-90 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                           : 'text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 cursor-not-allowed opacity-60'
                       }`}
-                      style={isAdmin ? { backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` } : {}}
+                      style={(role === "admin" || role === "super admin") ? { backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` } : {}}
                     >
                       Admin Panel
                     </button>

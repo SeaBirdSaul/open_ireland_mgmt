@@ -47,8 +47,8 @@ export default function AdminLoginRegisterPopup({
                 throw new Error(errData.detail || "Sign in failed");
             }
             const data = await res.json();
-            console.log(data.is_admin)
-            if (!data.is_admin) {
+            console.log(data.role === "admin")
+            if (data.role !== "admin" || data.role !== "super admin") {
                 throw new Error("This account is not an admin account");
             }
             onLoginSuccess(username, data.user_id);

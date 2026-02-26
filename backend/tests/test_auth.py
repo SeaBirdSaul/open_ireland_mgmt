@@ -23,7 +23,7 @@ def test_user_registration_success(client, db_session):
     assert data["username"] == "newuser"
     assert data["email"] == "newuser@example.com"
     assert "password" not in data
-    assert data["is_admin"] is False
+    assert data["role"] == "viewer"
 
 
 def test_user_registration_duplicate_username(client, test_user):

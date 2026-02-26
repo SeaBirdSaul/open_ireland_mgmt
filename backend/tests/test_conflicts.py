@@ -205,13 +205,13 @@ def test_max_two_users_per_device(authenticated_client, test_device, db_session)
         username="user1",
         email="user1@test.com",
         password=hash_password("pass123"),
-        is_admin=False
+        role="viewer"
     )
     user2 = User(
         username="user2",
         email="user2@test.com",
         password=hash_password("pass123"),
-        is_admin=False
+        role="viewer"
     )
     db_session.add_all([user1, user2])
     db_session.commit()

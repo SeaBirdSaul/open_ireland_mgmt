@@ -448,11 +448,14 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         request.session.clear()
         return JSONResponse({"authenticated": False}, status_code=401)
 
+    if (user.status or "").lower() != "active":
+        request.session.clear()
+        return JSONResponse({"authenticated": False}, status_code=403)
     return {
         "authenticated": True,
         "user_id": user.id,
         "username": user.username,
-        "is_admin": bool(getattr(user, "is_admin", False)),
+        "role": user.role,
         "email": user.email,
         "previous_login_at": user.previous_login_at.isoformat() if user.previous_login_at else None,
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
@@ -556,6 +559,7 @@ def register_user(
         username=user.username,
         email=user.email,
         password=hashed_pass,
+        status="active",
     )
     db.add(new_user)
     db.commit()
@@ -613,6 +617,8 @@ def login_user(
     if not password_valid:
         raise HTTPException(status_code=400, detail="Invalid username or password")
     
+    if (usre.status or "").lower() != "active":
+        raise HTTPException(status_code=403, detail="Account is inactive")
     now = datetime.now()
     user.previous_login_at = user.last_login_at
     user.last_login_at = now
@@ -829,7 +835,7 @@ async def create_bookings(
             record_logs(
                 db,
                 actor_id = req.user_id,
-                actor_role = "admin" if getattr(user, "is_admin", False) else "viewer",
+                actor_role = req.role,
                 action = "submit_bookings",
                 entity_type = "booking",
                 entity_id = None,
@@ -852,7 +858,7 @@ async def create_bookings(
             record_logs(
                 db,
                 actor_id = req.user_id,
-                actor_role = "admin" if getattr(user, "is_admin", False) else "viewer",
+                actor_role = req.role,
                 action = "submit_bookings",
                 entity_type = "booking",
                 entity_id = None,
@@ -874,7 +880,7 @@ async def create_bookings(
         record_logs(
             db,
             actor_id = user.id,
-            actor_role = "admin" if getattr(user, "is_admin", False) else "viewer",
+            actor_role = user.role,
             action = "submit_bookings",
             entity_type = "booking",
             entity_id = str(created_booking_ids[0]) if created_booking_ids else None,
@@ -968,7 +974,7 @@ def cancel_booking(
         )
 
     acting_user = db.query(models.User).get(acting_user_id)
-    actor_role = "admin" if getattr(acting_user, "is_admin", False) else "viewer"
+    actor_role = acting_user.role
     try: 
         related_bookings = (
             db.query(models.Booking)
@@ -1113,7 +1119,7 @@ def update_booking_collaborators(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found.")
 
-    actor_role = "admin" if getattr(owner, "is_admin", False) else "viewer"
+    actor_role = owner.role
 
     try:
         owner_bookings = [b for b in bookings if not b.is_collaborator]
@@ -1266,7 +1272,7 @@ def rebook_booking(
     requester = db.query(models.User).get(payload.user_id)
     if not requester:
         raise HTTPException(status_code=404, detail="Requesting user not found.")
-    actor_role = "admin" if getattr(requester, "is_admin", False) else "viewer"
+    actor_role = requester.role
 
     target_ids = payload.booking_ids or [booking_id]
     bookings = (
@@ -1490,7 +1496,7 @@ def extend_booking(
     requester = db.query(models.User).get(payload.user_id)
     if not requester:
         raise HTTPException(status_code=404, detail="Requesting user not found.")
-    actor_role = "admin" if getattr(requester, "is_admin", False) else "viewer"
+    actor_role = requester.role
 
     target_ids = payload.booking_ids or [booking_id]
     bookings = (
@@ -1704,7 +1710,7 @@ def cancel_booking_group(
             detail="Only the booking owner can cancel this booking group.",
         )
     actor_user = db.query(models.User).get(payload.user_id)
-    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
+    actor_role = actor_user.role
 
     try:
         updated_booking_ids: List[int] = []
@@ -1832,7 +1838,7 @@ def extend_booking_group(
             detail="Only the booking owner can extend this booking group.",
         )
     actor_user = db.query(models.User).get(payload.user_id)
-    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
+    actor_role = actor_user.role
 
     owner_bookings = [b for b in all_bookings if not b.is_collaborator]
 
@@ -2039,7 +2045,7 @@ def rebook_booking_group(
             detail="Only the booking owner can rebook this booking group.",
         )
     actor_user = db.query(models.User).get(payload.user_id)
-    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
+    actor_role = actor_user.role
 
     if payload.end_date < payload.start_date:
         raise HTTPException(
@@ -2531,7 +2537,7 @@ def create_booking_favorite(
     user = db.query(models.User).get(payload.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    actor_role = "admin" if getattr(user, "is_admine", False) else "viewer"
+    actor_role = user.role
 
     favorite = None
     try:
@@ -2651,7 +2657,7 @@ def update_booking_favorite(
     favorite = db.query(models.BookingFavorite).get(favorite_id)
     if not favorite:
         raise HTTPException(status_code=404, detail="Favorite not found")
-    actor_role = "admin" if getattr(favorite.user_id, "is_admin", False) else "viewer"
+    actor_role = favorite.role
     try:
         if payload.name is not None:
             name = payload.name.strip()
@@ -2745,7 +2751,7 @@ def delete_booking_favorite(favorite_id: int, db: Session = Depends(get_db)):
     if not favorite:
         raise HTTPException(status_code=404, detail="Favorite not found")
     actor_user = db.query(models.User).get(favorite.user_id)
-    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
+    actor_role = actor_user.role
     actor_id = favorite.user_id
     try:
         db.delete(favorite)
@@ -2834,7 +2840,7 @@ def delete_booking(booking_id: int, db: Session = Depends(get_db)):
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found.")
     actor_user = db.query(models.User).get(booking.user_id)
-    actor_role = "admin" if getattr(actor_user, "is_admin", False) else "viewer"
+    actor_role = actor_user.role
     actor_id = booking.user_id
     deleted_booking_ids: List[int] = []
     try:
@@ -2905,7 +2911,7 @@ def delete_booking(booking_id: int, db: Session = Depends(get_db)):
         record_logs(
             db,
             actor_id = actor_id,
-            actor_role = actor_user,
+            actor_role = actor_role,
             action = "delete_bookings",
             entity_type = "booking",
             entity_id = str(booking_id),

@@ -27,7 +27,7 @@ const NAV_ITEMS = [
 export default function AdminShell() {
     const location = useLocation();
     const navigate = useNavigate();
-    const { username, isAdmin, clearAuth } = useAuthStore();
+    const { username, role , clearAuth } = useAuthStore();
     const { isPrioritySeason, setPrioritySeason, initialize: initAdminStore } = useAdminStore();
 
     // Track window size for responsive behavior

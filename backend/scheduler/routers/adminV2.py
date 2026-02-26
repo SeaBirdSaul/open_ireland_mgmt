@@ -14,6 +14,7 @@ from backend.scheduler import schemas
 from backend.core.deps import get_db
 from backend.scheduler import models
 from backend.scheduler.routers.admin import admin_required
+from backend.core.hash import hash_password
 
 router = APIRouter(prefix="/admin/v2", tags=["admin_v2"])
 
@@ -31,7 +32,7 @@ def get_session(request: Request, db: Session = Depends(get_db)):
     # Minimal shape expected by tests
     return {
         "user": {"username": user.username},
-        "role": "Super Admin",
+        "role": "super admin",
         "status": "active",
         "permissions": {
             "bookings:read": True,
@@ -372,7 +373,7 @@ def list_users(request: Request, db: Session = Depends(get_db), role: str | None
             "id": user.id,
             "username": user.username,
             "email": user.email,
-            "role": (admin_role.role if admin_role else("Admin" if user.is_admin else "Viewer")),
+            "role": (admin_role.role if admin_role else user.role),
             "status": (admin_role.status if admin_role else "active"),
             "bookings_count": counts.get(user.id, 0),
             "last_active": None,
@@ -389,10 +390,15 @@ def invite_user( payload: schemas.AdminUserInviteRequest, request: Request, db: 
     inviter_id = request.session.get("user_id")
 
     token = secrets.token_hex(32)
+    hashed_password = hash_password(payload.password)
     inv = models.AdminInvitation(
         email=payload.email,
-        handle=payload.handle,
+        firstName=payload.firstName.strip(),
+        lastName=payload.lastName.strip(),
+        handle=payload.handle.strip() if payload.handle else None,
+        password=hashed_password,
         role=payload.role.value if hasattr(payload.role, "value") else str(payload.role),
+        notes=payload.notes.strip() if payload.notes else None,
         invited_by=inviter_id,
         token=token,
         expires_at=datetime.now(UTC) + timedelta(days=7),

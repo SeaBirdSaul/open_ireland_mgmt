@@ -40,7 +40,7 @@ class User(BaseModel):
     id: int
     username: str
     email: Optional[str] = None
-    is_admin: bool
+    role: str
     discord_id: Optional[str] = None
 
     class Config:
@@ -144,10 +144,10 @@ class AdminCreate(BaseModel):
 
 
 class AdminRoleType(str, Enum):
-    super_admin = "Super Admin"
-    admin = "Admin"
-    approver = "Approver"
-    viewer = "Viewer"
+    super_admin = "super admin"
+    admin = "admin"
+    approver = "approver"
+    viewer = "viewer"
 
 
 class AdminStatus(str, Enum):
@@ -379,7 +379,10 @@ class AdminUserInviteRequest(BaseModel):
     email: str
     handle: Optional[str] = None
     role: AdminRoleType
-
+    firstName: str = Field(min_length=1, max_length=50)
+    lastName: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=8, max_length=128)
+    notes: Optional[str] = Field(default=None, max_length=4000)
 
 class AdminUserRoleUpdateRequest(BaseModel):
     role: AdminRoleType

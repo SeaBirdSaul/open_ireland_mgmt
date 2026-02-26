@@ -132,7 +132,7 @@ def test_user(db_session):
         username="testuser",
         email="test@example.com",
         password=hashed_password,
-        is_admin=False,
+        role="viewer",
         discord_id="123456789"
     )
     db_session.add(user)
@@ -149,7 +149,7 @@ def test_admin(db_session):
         username="testadmin",
         email="admin@example.com",
         password=hashed_password,
-        is_admin=True,
+        role="admin",
         discord_id="987654321"
     )
     db_session.add(admin)

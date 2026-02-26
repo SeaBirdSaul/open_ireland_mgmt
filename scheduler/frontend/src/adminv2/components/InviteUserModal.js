@@ -12,7 +12,7 @@ function validateField(name, value){
       return !value || value.trim() === '' ? 'Role is required' : null;
     case 'password':
       if (!value || value.trim() === '') return'Password is required';
-      else if ( value.length > 8 ) return 'Password must be longer than 8 characters';
+      else if ( value.length < 8 ) return 'Password must be longer than 8 characters';
       return null;
     default:
       return null;

@@ -52,7 +52,7 @@ def create_admin_user(username: str, email: str, password: str):
             username=username,
             email=email,
             password=hashed_password,
-            is_admin=True
+            role=admin
         )
         
         db.add(admin_user)

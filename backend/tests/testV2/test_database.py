@@ -336,7 +336,7 @@ def test_delete_rows_from_all_tables(db_session, test_tables):
         username="delete_user",
         email="delete_user@example.com",
         password="hashed",
-        is_admin=False,
+        role="viewer",
     )
     device = models.Device(
         deviceType="Switch",

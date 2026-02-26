@@ -125,7 +125,7 @@ export default function AdminPage() {
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.logged_in && data.is_admin) {
+                    if (data.logged_in && data.role === "admin") {
                         setUserId(data.user_id);
                         setUserName(data.username);
                     }

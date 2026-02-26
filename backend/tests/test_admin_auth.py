@@ -30,7 +30,7 @@ def test_admin_registration_success(client, db_session, monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["username"] == "newadmin"
-    assert data["is_admin"] is True
+    assert data["role"] == "admin"
 
 
 def test_admin_registration_invalid_secret(client, monkeypatch):
