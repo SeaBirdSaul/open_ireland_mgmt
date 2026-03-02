@@ -6,7 +6,7 @@
  */
 import React, { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchBookingDetail, approveBookings, declineBookings } from '../api';
+import { fetchBookingGroupDetail, approveBookings, declineBookings } from '../api';
 import { formatDateTime } from '../utils/formatters';
 import { useToastContext } from '../../contexts/ToastContext';
 import { useAdminContext } from '../context/AdminContext';
@@ -57,24 +57,61 @@ function ConflictList({ conflicts }) {
   );
 }
 
-export default function BookingDetailDrawer({ bookingId, open, onClose }) {
+const TERMINAL_STATUSES = new Set(['CANCELLED', 'REJECTED', 'DECLINED', 'CONFIRMED', 'APPROVED', 'EXPIRED']);
+
+function toDisplayStatus(statuses = []) {
+  const normalized = statuses.map((s) => String(s || '').toUpperCase());
+
+  if (normalized.includes('CONFLICTING')) return 'CONFLICTING';
+
+  const allTerminal = normalized.length > 0 && normalized.every((s) => TERMINAL_STATUSES.has(s));
+  if (allTerminal) {
+    const uniq = [...new Set(normalized)];
+    if (uniq.length === 1) {
+      const s = uniq[0];
+      if (s === 'DECLINED' || s === 'REJECTED') return 'REJECTED';
+      if (s === 'CONFIRMED' || s === 'APPROVED') return 'APPROVED';
+      if (s === 'CANCELLED') return 'CANCELLED';
+      if (s === 'EXPIRED') return 'EXPIRED';
+    }
+    if (uniq.includes('CANCELLED')) return 'CANCELLED';
+    if (uniq.includes('DECLINED') || uniq.includes('REJECTED')) return 'REJECTED';
+    if (uniq.includes('EXPIRED')) return 'EXPIRED';
+    return 'APPROVED';
+  }
+
+  return 'PENDING';
+}
+
+function statusBadgeClass(s) {
+  if (s === 'CONFLICTING') return 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200';
+  if (s === 'APPROVED') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200';
+  if (s === 'REJECTED') return 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200';
+  if (s === 'CANCELLED') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200';
+  if (s === 'EXPIRED') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200';
+  return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200';
+}
+
+export default function BookingDetailDrawer({ groupId, open, onClose }) {
   const toast = useToastContext();
   const { permissions } = useAdminContext();
   const queryClient = useQueryClient();
 
   const bookingQuery = useQuery({
-    queryKey: ['admin-booking-detail', bookingId],
-    queryFn: () => fetchBookingDetail(bookingId),
-    enabled: open && Boolean(bookingId),
+    queryKey: ['admin-booking-group-detail', groupId],
+    queryFn: () => fetchBookingGroupDetail(groupId),
+    enabled: open && Boolean(groupId),
   });
 
+  const bookingIds = bookingQuery.data?.bookings?.map((b) => b.booking_id) || [];
+
   const approveMutation = useMutation({
-    mutationFn: () => approveBookings({ booking_ids: [bookingId] }),
+    mutationFn: () => approveBookings({ booking_ids: bookingIds }),
     onSuccess: async () => {
       toast.success('Booking approved.');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['admin-bookings'] }),
-        queryClient.invalidateQueries({ queryKey: ['admin-booking-detail', bookingId] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-booking-group-detail', groupId] }),
       ]);
       onClose?.();
     },
@@ -82,12 +119,12 @@ export default function BookingDetailDrawer({ bookingId, open, onClose }) {
   });
 
   const declineMutation = useMutation({
-    mutationFn: () => declineBookings({ booking_ids: [bookingId] }),
+    mutationFn: () => declineBookings({ booking_ids: bookingIds }),
     onSuccess: async () => {
       toast.success('Booking declined.');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['admin-bookings'] }),
-        queryClient.invalidateQueries({ queryKey: ['admin-booking-detail', bookingId] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-booking-group-detail', groupId] }),
       ]);
       onClose?.();
     },
@@ -107,7 +144,7 @@ export default function BookingDetailDrawer({ bookingId, open, onClose }) {
 
   if (!open) return null;
 
-  const booking = bookingQuery.data?.booking;
+  const data = bookingQuery.data;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -121,7 +158,7 @@ export default function BookingDetailDrawer({ bookingId, open, onClose }) {
           <div>
             <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Booking detail</div>
             <div className="text-lg font-semibold text-gray-900 dark:text-white">
-              #{bookingId}
+              #{groupId}
             </div>
           </div>
           <button
@@ -139,7 +176,7 @@ export default function BookingDetailDrawer({ bookingId, open, onClose }) {
           <div className="p-6 text-sm text-red-600 dark:text-red-300">
             Unable to load booking details. Please try again later.
           </div>
-        ) : booking ? (
+        ) : data ? (
           <div className="p-6 space-y-6">
             <section>
               <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold mb-2">
@@ -148,20 +185,20 @@ export default function BookingDetailDrawer({ bookingId, open, onClose }) {
               <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4 space-y-2 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600 dark:text-gray-400">User</span>
-                  <span className="text-gray-900 dark:text-gray-100">{booking.user.username}</span>
+                  <span className="text-gray-900 dark:text-gray-100">{data.owner?.username || 'Unknown'}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600 dark:text-gray-400">Device</span>
-                  <span className="text-gray-900 dark:text-gray-100">{booking.device.name}</span>
+                  <span className="text-gray-900 dark:text-gray-100">{formatDateTime(data.summary?.group_start)} → {formatDateTime(data.summary?.group_end)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600 dark:text-gray-400">Status</span>
-                  <span className="text-gray-900 dark:text-gray-100">{booking.status}</span>
+                  <span className="text-gray-900 dark:text-gray-100">{data.summary?.statuses?.join(', ') || 'Pending'}</span>
                 </div>
                 <div>
                   <div className="text-gray-600 dark:text-gray-400">Comment</div>
                   <div className="mt-1 text-gray-900 dark:text-gray-100 text-sm">
-                    {booking.comment || '—'}
+                    {(data.summary?.comments || []).length ? data.summary.comments.join(' |') : '-'}
                   </div>
                 </div>
               </div>
@@ -193,7 +230,28 @@ export default function BookingDetailDrawer({ bookingId, open, onClose }) {
             )}
 
             <section>
-              <Timeline label="Historical usage" items={bookingQuery.data.history} />
+              <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold mb-2">Device in group</div>
+              <ul className="space-y-2">
+                {(data.devices || []).map((d) => (
+                  <li key={d.device_id} className="border border-gray-200 dark:border-gray-800 rounded-lg px-3 py-2">
+                    <div className='text-sm font-semibold'>{d.device_name}</div>
+                    <div className='text-xs text-gray-500'>{d.device_type}</div>
+                    <div className='text-xs text-gray-500'>
+                      {formatDateTime(d.first_start_time)} → {formatDateTime(d.last_end_time)}
+                    </div>
+                    {(() => {
+                      const deviceStatus = toDisplayStatus(d.statuses || []);
+                      return (
+                        <div className="mt-1">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${statusBadgeClass(deviceStatus)}`}>
+                            {deviceStatus}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </li>
+                ))}
+              </ul>
             </section>
 
             {canEditBookings(permissions) && (

@@ -500,7 +500,7 @@ export default function BookingsPage() {
       />
 
       <BookingDetailDrawer
-        bookingId={focusedGroupId}
+        groupId={focusedGroupId}
         open={Boolean(focusedGroupId)}
         onClose={handleCloseDrawer}
       />

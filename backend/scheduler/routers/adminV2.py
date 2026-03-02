@@ -463,7 +463,7 @@ def get_booking_group_details(group_id: str, request: Request, db: Session = Dep
 
     rows = (
         db.query(models.Booking)
-        .filer(models.Booking.grouped_booking_id == group_id)
+        .filter(models.Booking.grouped_booking_id == group_id)
         .order_by(models.Booking.start_time.asc())
         .all()
     )
@@ -471,8 +471,56 @@ def get_booking_group_details(group_id: str, request: Request, db: Session = Dep
         raise HTTPException(status=404, detail="Booking group not found")
 
     lead = rows[0]
+    owner = lead.user
+    
+    comments = [c for c in { (b.comment or "").strip() for b in rows } if c]
+
+    device_map = {}
+    for b in rows:
+        dkey = b.device_id
+        if dkey not in device_map:
+            device_map[dkey] = {
+                "device_id": b.device_id,
+                "device_name": b.device.deviceName if b.device else "Unknown",
+                "device_type": b.device.deviceType if b.device else "Unknown",
+                "first_start_time": b.start_time,
+                "last_end_time": b.end_time,
+                "statuses": set([b.status]),
+                "booking_count": 1,
+            }
+        else:
+            item = device_map[dkey]
+            item["first_start_time"] = min(item["first_start_time"], b.start_time)
+            item["last_end_time"] = max(item["last_end_time"], b.end_time)
+            item["statuses"].add(b.status)
+            item["booking_count"] += 1
+
+    devices = []
+    for v in device_map.values():
+        devices.append({
+            "device_id": v["device_id"],
+            "device_name": v["device_name"],
+            "device_type": v["device_type"],
+            "first_start_time": v["first_start_time"].isoformat() if v["first_start_time"] else None,
+            "last_end_time": v["last_end_time"].isoformat() if v["last_end_time"] else None,
+            "statuses": sorted(list(v["statuses"])),
+            "booking_count": v["booking_count"],
+        })
+
     return {
         "grouped_booking_id": group_id,
+        "owner": {
+            "id": owner.id if owner else None,
+            "username": owner.username if owner else "Unknown",
+        },
+        "summary": {
+            "statuses": sorted({b.status for b in rows}),
+            "count": len(rows),
+            "group_start": min(b.start_time for b in rows).isoformat(),
+            "group_end": max(b.end_time for b in rows).isoformat(),
+            "comments": comments,
+        },
+        "devices": devices,
         "bookings": [
             {
                 "booking_id": b.booking_id,
@@ -480,10 +528,6 @@ def get_booking_group_details(group_id: str, request: Request, db: Session = Dep
                 "start_time": b.start_time.isoformat() if b.start_time else None,
                 "end_time": b.end_time.isoformat() if b.end_time else None,
                 "comment": b.comment,
-                "user": {
-                    "id": b.user.id if b.user else None,
-                    "username": b.user.username if b.user else "Unknown",
-                },
                 "device": {
                     "id": b.device.id if b.device else None,
                     "name": b.device.deviceName if b.device else "Unknown",
@@ -492,9 +536,4 @@ def get_booking_group_details(group_id: str, request: Request, db: Session = Dep
             }
             for b in rows
         ],
-        "summary": {
-            "statuses": sorted({b.status for b in rows}),
-            "count": len(rows),
-            "lead_booking_id": lead.booking_id,
-        },
     }
