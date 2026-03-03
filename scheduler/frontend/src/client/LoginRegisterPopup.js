@@ -103,8 +103,8 @@ export default function LoginRegisterPopup({
     };
 
     // ===================== Handle User Register =====================
-    const handleRegister = async (username, email, pass1, pass2, discordId) => {
-        if (!username || !email || !pass1 || !pass2 || !discordId) {
+    const handleRegister = async (username, email, firstName, lastName, pass1, pass2, discordId) => {
+        if (!username || !email || !firstName || !lastName || !pass1 || !pass2 || !discordId) {
             alert('All fields are required');
             return;
         }
@@ -126,6 +126,8 @@ export default function LoginRegisterPopup({
                 body: JSON.stringify({
                     username,
                     email,
+                    firstName,
+                    lastName,
                     password: hashedPass1,
                     password2: hashedPass2,
                     discord_id: discordId
@@ -234,16 +236,32 @@ function LoginForm({ onSwitch, onLogin }) {
 function RegisterForm({ onSwitch, onRegister }) {
     const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
+    const [firstName, setFirstName] = useState('');
+    const [lastName, setLastName] = useState('');
     const [pass1, setPass1] = useState('');
     const [pass2, setPass2] = useState('');
     const [showPassword1, setShowPassword1] = useState(false);
     const [showPassword2, setShowPassword2] = useState(false);
     const [discordId, setDiscordId] = useState("");
 
-    const handleSubmit = () => onRegister(username, email, pass1, pass2, discordId);
+    const handleSubmit = () => onRegister(username, email, firstName, lastName, pass1, pass2, discordId);
 
     return (
         <div>
+            <div className='popup-title'>First Name</div>
+            <input 
+                type="text"
+                value={firstName}
+                onChange={e => setFirstName(e.target.value)}
+            />
+
+            <div className='popup-title'>Last Name</div>
+            <input 
+                type="text"
+                value={lastName}
+                onChange={e => setLastName(e.target.value)}
+            />
+
             <div className="popup-title">User Name:</div>
             <input
                 type="text"

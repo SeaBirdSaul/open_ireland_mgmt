@@ -560,7 +560,10 @@ def register_user(
     new_user = models.User(
         username=user.username,
         email=user.email,
+        firstName = user.firstName.strip(),
+        lastName = user.lastName.strip(),
         password=hashed_pass,
+        role = "viewer",
         status="active",
     )
     db.add(new_user)

@@ -404,8 +404,8 @@ function ClientV2Inner() {
   );
 
   const handleRegisterSubmit = useCallback(
-    async ({ username, email, password, confirmPassword }) => {
-      if (!username || !password || !confirmPassword) {
+    async ({ username, email, firstName, lastName, password, confirmPassword }) => {
+      if (!username || !firstName || !lastName || !password || !confirmPassword) {
         toast.error('Username and both password fields are required.');
         return;
       }
@@ -431,6 +431,8 @@ function ClientV2Inner() {
           body: JSON.stringify({
             username,
             email: email || null,
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
             password: hashedPassword,
             password2: hashedConfirm,
           }),
@@ -775,6 +777,8 @@ function ClientV2Inner() {
 function AuthModal({ mode, onClose, onSwitchMode, onLogin, onRegister, submitting }) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -783,6 +787,8 @@ function AuthModal({ mode, onClose, onSwitchMode, onLogin, onRegister, submittin
   useEffect(() => {
     setUsername('');
     setEmail('');
+    setFirstName('');
+    setLastName('');
     setPassword('');
     setConfirmPassword('');
     setShowPassword(false);
@@ -794,7 +800,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onLogin, onRegister, submittin
     if (mode === 'login') {
       onLogin({ username, password });
     } else {
-      onRegister({ username, email, password, confirmPassword });
+      onRegister({ username, email, firstName, lastName, password, confirmPassword });
     }
   };
 
@@ -806,7 +812,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onLogin, onRegister, submittin
       aria-modal="true"
     >
       <div
-        className="w-full max-w-md rounded-2xl glass-panel shadow-2xl border border-gray-200/60 dark:border-gray-700/60 backdrop-blur"
+        className="w-full max-w-xl rounded-2xl glass-panel shadow-2xl border border-gray-200/60 dark:border-gray-700/60 backdrop-blur"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-200/70 dark:border-gray-700/70 px-6 py-4">
@@ -842,9 +848,44 @@ function AuthModal({ mode, onClose, onSwitchMode, onLogin, onRegister, submittin
           </div>
 
           {mode === 'register' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor='auth-first-name'>
+                  First Name
+                </label> 
+                <input 
+                  id="auth-first-name"
+                  type="text"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                  style={{ '--tw-ring-color': `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` }}
+                  onFocus={(e) => e.target.style.setProperty('--tw-ring-color', `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor='auth-last-name'>
+                  Last Name
+                </label> 
+                <input 
+                  id="auth-last-name"
+                  type="text"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                  style={{ '--tw-ring-color': `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` }}
+                  onFocus={(e) => e.target.style.setProperty('--tw-ring-color', `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`)}
+                  required
+                />
+              </div>
+            </div>
+          )}
+
+          {mode === 'register' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">
-                Email (optional)
+                Email
               </label>
               <input
                 id="auth-email"

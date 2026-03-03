@@ -18,6 +18,8 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
+    firstName: str = Field(min_length=1, max_length=200)
+    lastName: str = Field(min_length=1, max_length=200)
     password: str
     password2: str
 
