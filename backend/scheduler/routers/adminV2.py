@@ -4,6 +4,7 @@
     admin_v2.py
     Backend API v2 router for admin operations 
 '''
+import hashlib
 from datetime import datetime, UTC, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ from backend.core.deps import get_db
 from backend.scheduler import models
 from backend.scheduler.routers.admin import admin_required
 from backend.core.hash import hash_password
+from backend.scheduler.services.invitations import accept_invitation_record, serialize_invitation
 
 router = APIRouter(prefix="/admin/v2", tags=["admin_v2"])
 
@@ -374,8 +376,8 @@ def list_users(request: Request, db: Session = Depends(get_db), role: str | None
             "id": user.id,
             "username": user.username,
             "email": user.email,
-            "role": (admin_role.role if admin_role else user.role),
-            "status": (admin_role.status if admin_role else "active"),
+            "role": user.role,
+            "status": user.status,
             "bookings_count": counts.get(user.id, 0),
             "last_active": None,
             "approval_limits": admin_role.approval_limits if admin_role else None,
@@ -391,7 +393,8 @@ def invite_user( payload: schemas.AdminUserInviteRequest, request: Request, db: 
     inviter_id = request.session.get("user_id")
 
     token = secrets.token_hex(32)
-    hashed_password = hash_password(payload.password)
+    sha_password = hashlib.sha256(payload.password.encode("utf-8")).hexdigest()
+    hashed_password = hash_password(sha_password)
     inv = models.AdminInvitation(
         email=payload.email,
         firstName=payload.firstName.strip(),
@@ -416,6 +419,57 @@ def invite_user( payload: schemas.AdminUserInviteRequest, request: Request, db: 
         "expires_at": inv.expires_at.isoformat(),
     }
 
+@router.get("/invitations")
+def list_invites(
+    request: Request,
+    db: Session = Depends(get_db),
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    admin_required(request, db)
+
+    query = db.query(models.AdminInvitation).order_by(models.AdminInvitation.created_at.desc())
+    rows = query.offset(offset).limit(limit).all()
+
+    items = [serialize_invitation(inv) for inv in rows]
+    if status:
+        items = [i for i in items if i["status"] == status]
+    
+    total = len(items) if status else query.count()
+    return {"items": items, "meta": {"total": total, "limit": limit, "offset": offset}}
+
+@router.post("/invitations/{invitation_id}/approve")
+def approve_invitation(invitation_id: int, request: Request, db: Session = Depends(get_db)):
+    admin_required(request, db)
+
+    inv = db.query(models.AdminInvitation).get(invitation_id)
+    if not inv:
+        raise HTTPException(status=404, detail="Invitation not found")
+    
+    user = accept_invitation_record(inv, db)
+    db.commit()
+    return {"invitation_id": invitation_id, "status": "accepted", "user_id": user.id, "username": user.username}
+
+@router.post("/invitations/{invitation_id}/reject")
+def reject_invitation(
+    invitation_id: int,
+    payload: schemas.AdminInvitationRejectRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin_required(request, db)
+
+    inv = db.query(models.AdminInvitation).get(invitation_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invitation not found")
+    if inv.accepted_at:
+        raise HTTPException(status_code=409, detail="Invitation already accepted")
+    
+    db.delete(inv)
+    db.commit()
+    return {"invitation_id": invitation_id, "status": "rejected"}
+
 # Updates a selected users role
 @router.post("/users/{user_id}/role")
 def update_user_role(user_id: int, payload: schemas.AdminUserRoleUpdateRequest, request: Request, db: Session = Depends(get_db)):
@@ -424,13 +478,17 @@ def update_user_role(user_id: int, payload: schemas.AdminUserRoleUpdateRequest, 
     user = db.query(models.User).get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    new_role = payload.role.value if hasattr(payload.role, "value") else str(payload.role)
+
+    user.role = new_role
     
     role_row = db.query(models.AdminRole).filter(models.AdminRole.user_id == user_id).first()
     if not role_row:
-        role_row = models.AdminRole(user_id=user_id, role="Viewer", status="active")
+        role_row = models.AdminRole(user_id=user_id, role=new_role, status=(user.status or "active"))
         db.add(role_row)
 
-    role_row.role = payload.role.value if hasattr(payload.role, "value") else str(payload.role)
+    role_row.role = new_role
     role_row.approval_limits = payload.approval_limits
     role_row.updated_at = datetime.utcnow()
     db.commit()
@@ -446,12 +504,16 @@ def update_user_status(user_id: int, payload: schemas.AdminUserStatusUpdateReque
     if not user:
         raise HTTPException(status_code=404, detials="User not found")
     
+    new_status = payload.status.value if hasattr(payload.status, "value") else str(pauload.status)
+
+    user.status = new_status
+    
     role_row = db.query(models.AdminRole).filter(models.AdminRole.user_id == user_id).first()
     if not role_row:
-        role_row = models.AdminRole(user_id=user_id, role="Viewer", status="active")
+        role_row = models.AdminRole(user_id=user_id, role=(user.role or "viewer"), status=new_status)
         db.add(role_row)
 
-    role_row.status = payload.status.value if hasattr(payload.status, "value") else str(payload.status)
+    role_row.status = new_status
     role_row.updated_at = datetime.utcnow()
     db.commit()
 

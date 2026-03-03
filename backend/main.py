@@ -56,6 +56,7 @@ from backend.scheduler.routers.admin import router as admin_router
 from backend.scheduler.routers.adminV2 import router as admin_v2_router
 from backend.scheduler.routers.admin_debug import router as admin_debug_router
 from backend.scheduler.routers.control_panel import router as control_panel_router
+# from backend.scheduler.services.invitations import router as invitations_router
 from backend.core.discord_utils import send_booking_created_notification
 
 # Import inventory management router
@@ -111,6 +112,7 @@ app.include_router(admin_router)
 app.include_router(admin_v2_router)
 app.include_router(admin_debug_router)
 app.include_router(control_panel_router)
+# app.include_router(invitations_router)
 try:
     app.include_router(inventory_router, prefix="/api/inventory", tags=["inventory"])
 except Exception as exc:
@@ -593,7 +595,11 @@ def login_user(
 ):
     user = (
         db.query(models.User)
-        .filter(models.User.username == login_data.username)
+        .filter(
+            or_(models.User.username == login_data.username,
+                models.User.email == login_data.username,
+            )
+        )
         .first()
     )
     

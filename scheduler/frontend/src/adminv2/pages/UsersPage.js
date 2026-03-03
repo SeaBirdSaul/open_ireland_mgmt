@@ -8,7 +8,7 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { fetchUsers, inviteUser, updateUserRole, updateUserStatus } from '../api';
+import { fetchUsers, inviteUser, updateUserRole, updateUserStatus, fetchInvitations, approveInvitation, rejectInvitation } from '../api';
 import DataTable from '../components/DataTable';
 import FilterBar from '../components/FilterBar';
 import { useToastContext } from '../../contexts/ToastContext';
@@ -47,6 +47,9 @@ export default function UsersPage() {
   const role = searchParams.get('role') || undefined;
   const status = searchParams.get('status') || undefined;
 
+  const view = searchParams.get('view') || 'users';
+  const invitationStatus = searchParams.get('invStatus') || undefined;
+  
   const usersQuery = useQuery({
     queryKey: ['admin-users', { role, status }],
     queryFn: () => fetchUsers({ role, status }),
@@ -96,6 +99,32 @@ export default function UsersPage() {
     onError: (err) => toast.error(err?.message || 'Unable to update status.'),
   });
 
+  const invitationQuery = useQuery({
+    queryKey: ['admin-invitations', { invitationStatus }],
+    queryFn: () => fetchInvitations({ status: invitationStatus }),
+    enabled: view === 'invitations',
+    keepPreviousData: true,
+  });
+
+  const approveInviteMutation = useMutation({
+    mutationFn: (invitationId) => approveInvitation(invitationId),
+    onSuccess: async () => {
+      toast.success('Invitation approved.');
+      await queryClient.invalidateQueries({ queryKey: ['admin-invitations'] });
+      await queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+    },
+    onError: (err) => toast.error(err?.message || 'Unable to approve invitation.'),
+  });
+
+  const rejectInviteMutation = useMutation({
+    mutationFn: (invitationId) => rejectInvitation(invitationId),
+    onSuccess: async () => {
+      toast.success('Invitation rejected.');
+      await queryClient.invalidateQueries({ queryKey: ['admin-invitations'] });
+    },
+    onError: (err) => toast.error(err?.message || 'Unable to reject invitation.'),
+  });
+
   const columns = useMemo(
     () => [
       {
@@ -139,6 +168,60 @@ export default function UsersPage() {
     ],
     []
   );
+
+  const invitationColumns = useMemo(() => [
+    {
+      key: 'email',
+      header: 'Email',
+      accessor: (row) => row.email
+    },
+    {
+      key: 'name',
+      header: 'Name',
+      accessor: (row) => `${row.firstName} ${row.lastName}`.trim() || '-'
+    },
+    {
+      key: 'handle',
+      header: 'Handle',
+      accessor: (row) => row.handle || '-'
+    },
+    {
+      key: 'role',
+      header: 'Role',
+      accessor: (row) => row.role
+    },
+    {
+      key: 'inviter',
+      header: 'Invited by',
+      accessor: (row) => row.inviter_username || '-'
+    },
+    {
+      key: 'expires_at',
+      header: 'Expires',
+      render: (row) => (row.expires_at ? new Date(row.expires_at).toLocaleString() : '-'),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      accessor: (row) => row.status,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      render: (row) => row.status === 'pending' ? (
+        <div className='flex gap-2'>
+          <button type="button" className='px-2 py-1 rounded bg-green-600 text-white text-xs'
+            onClick={() => approveInviteMutation.mutate(row.id)}>
+              Approve
+          </button>
+          <button type="button" className='px-2 py-1 rounded border text-xs'
+            onClick={() => rejectInviteMutation.mutate(row.id)}>
+              Reject
+          </button>
+        </div>
+      ) : '-',
+    },
+  ], [approveInviteMutation, rejectInviteMutation]);
 
   const filterChips = useMemo(() => {
     const chips = [];
@@ -203,66 +286,101 @@ export default function UsersPage() {
         onReset={() => setSearchParams(new URLSearchParams(), { replace: true })}
       />
 
-      <DataTable
-        rows={usersQuery.data?.items || []}
-        columns={columns}
-        selection={canEditUsers(permissions) ? selection : null}
-        bulkActions={
-          canEditUsers(permissions)
-            ? () => (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const roleInput = window.prompt('Set role for selected users:', 'Viewer');
-                      if (!roleInput) return;
-                      Array.from(selection.state.ids).forEach((userId) =>
-                        roleMutation.mutate({ userId, newRole: roleInput })
-                      );
-                      selection.clear();
-                    }}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                  >
-                    Set role
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextStatus = window.prompt('Set status (active/disabled):', 'active');
-                      if (!nextStatus) return;
-                      Array.from(selection.state.ids).forEach((userId) =>
-                        statusMutation.mutate({ userId, nextStatus })
-                      );
-                      selection.clear();
-                    }}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-md border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
-                  >
-                    Set status
-                  </button>
-                </div>
-              )
-            : null
-        }
-        loading={usersQuery.status === 'pending'}
-      />
-      <Modal isOpen={isInviteOpen} 
-      onClose={() => {
-        setIsInviteOpen(false);
-        setInviteForm(emptyInviteForm);
-      }} 
-      title="Invite User" 
-      size="lg">
-        <InviteUserModal
-          form={inviteForm}
-          setForm={setInviteForm}
-          onSubmit={handleInviteSubmit}
-          onCancel={() => {
-            setIsInviteOpen(false);
-            setInviteForm(emptyInviteForm);
+      <div className="inline-flex rounded-md border border-gray-300 dark:border-gray-700 overflow-hidden">
+        <button
+          type="button"
+          className={`px-3 py-1.5 text-sm ${view === 'users' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-900'}`}
+          onClick={() => {
+            const next = new URLSearchParams(searchParams);
+            next.set('view', 'users');
+            next.delete('invStatus');
+            setSearchParams(next, { replace: true });
           }}
-          isSubmitting={inviteMutation.status === 'pending'}
+        >
+          Users
+        </button>
+        <button
+          type="button"
+          className={`px-3 py-1.5 text-sm ${view === 'invitations' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-900'}`}
+          onClick={() => {
+            const next = new URLSearchParams(searchParams);
+            next.set('view', 'invitations');
+            setSearchParams(next, { replace: true });
+          }}
+        >
+          Invitations
+        </button>
+      </div>
+      
+      {view === 'users' && (
+        <DataTable
+          rows={usersQuery.data?.items || []}
+          columns={columns}
+          selection={canEditUsers(permissions) ? selection : null}
+          bulkActions={
+            canEditUsers(permissions)
+              ? () => (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const roleInput = window.prompt('Set role for selected users: (viewer/admin)', 'viewer');
+                        if (!roleInput) return;
+                        Array.from(selection.state.ids).forEach((userId) =>
+                          roleMutation.mutate({ userId, newRole: roleInput })
+                        );
+                        selection.clear();
+                      }}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                    >
+                      Set role
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextStatus = window.prompt('Set status (active/disabled):', 'active');
+                        if (!nextStatus) return;
+                        Array.from(selection.state.ids).forEach((userId) =>
+                          statusMutation.mutate({ userId, nextStatus })
+                        );
+                        selection.clear();
+                      }}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-md border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      Set status
+                    </button>
+                  </div>
+                )
+              : null
+          }
+          loading={usersQuery.status === 'pending'}
         />
-      </Modal>
+      )}
+      {view === 'invitations' && (
+        <DataTable
+          rows={invitationQuery.data?.items || []}
+          columns={invitationColumns}
+          loading={invitationQuery.status === 'pending'}
+        />
+      )}
+        <Modal isOpen={isInviteOpen} 
+        onClose={() => {
+          setIsInviteOpen(false);
+          setInviteForm(emptyInviteForm);
+        }} 
+        title="Invite User" 
+        size="lg">
+          <InviteUserModal
+            form={inviteForm}
+            setForm={setInviteForm}
+            onSubmit={handleInviteSubmit}
+            onCancel={() => {
+              setIsInviteOpen(false);
+              setInviteForm(emptyInviteForm);
+            }}
+            isSubmitting={inviteMutation.status === 'pending'}
+          />
+        </Modal>
     </div>
   );
 }

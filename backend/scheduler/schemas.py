@@ -384,6 +384,35 @@ class AdminUserInviteRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     notes: Optional[str] = Field(default=None, max_length=4000)
 
+class InviteAcceptRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+
+class AdminInvitationRow(BaseModel):
+    id: int
+    email: str
+    firstName: str
+    lastName: str
+    handle: Optional[str] = None
+    role: str
+    notes: Optional[str] = None
+    invited_by: Optional[str] = None
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: Optional[datetime] = None
+    status: str 
+
+class AdminInvitationListResponse(BaseModel):
+    items: List[AdminInvitationRow]
+    meta: PaginationMeta
+
+class AdminInvitationRejectRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=4000)
+
+class AdminInvitationActionResponse(BaseModel):
+    invitation_id: int
+    status: str
+    user_id: Optional[int] = None
+
 class AdminUserRoleUpdateRequest(BaseModel):
     role: AdminRoleType
     approval_limits: Optional[Dict[str, Any]] = None

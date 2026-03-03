@@ -158,6 +158,26 @@ export function updateUserStatus(userId, payload) {
   });
 }
 
+export function fetchInvitations(params = {}) {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if(value === undefined || value === null || value === '') return;
+    searchParams.set(key, value);
+  });
+  return adminRequest(`/admin/v2/invitations?${searchParams.toString()}`, {method: 'GET' });
+}
+
+export function approveInvitation(invitationId) {
+  return adminRequest(`/admin/v2/invitations/${invitationId}/approve`, { method: 'POST' });
+}
+
+export function rejectInvitation(invitationId, payload = {}) {
+  return adminRequest(`/admin/v2/invitations/${invitationId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchTopologies(params = {}) {
   const searchParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {

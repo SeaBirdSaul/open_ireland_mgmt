@@ -175,7 +175,7 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
     const booking2 = bookingQuery2.data?.booking;
 
     return(
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <div className="fixed inset-0 z-[100] flex justify-end">
             <div
             className="fixed inset-0 bg-black/40"
             onClick={onClosed}
@@ -215,7 +215,7 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
                             <button
                                 type="button"
                                 onClick={() => approveMutation1.mutate()}
-                                disabled={approveMutation1.isPending  || booking1.status != "CONFLICTING"}
+                                disabled={approveMutation1.isPending  || booking1.status !== "CONFLICTING"}
                                 className="w-full px-4 py-2 text-sm font-semibold rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
                             >
                                 Approve Booking {bookingId1}
@@ -223,7 +223,7 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
                             <button
                                 type="button"
                                 onClick={() => declineMutation1.mutate()}
-                                disabled={declineMutation1.isPending || booking1.status != "CONFLICTING"}
+                                disabled={declineMutation1.isPending || booking1.status !== "CONFLICTING"}
                                 className="w-full px-4 py-2 text-sm font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
                             >
                                 Decline Booking {bookingId1}
@@ -244,7 +244,7 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
                             <button
                                 type="button"
                                 onClick={() => approveMutation2.mutate()}
-                                disabled={approveMutation2.isPending || booking2.status != "CONFLICTING"}
+                                disabled={approveMutation2.isPending || booking2.status !== "CONFLICTING"}
                                 className="w-full px-4 py-2 text-sm font-semibold rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
                             >
                                 Approve Booking {bookingId2}
@@ -252,7 +252,7 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
                             <button
                                 type="button"
                                 onClick={() => declineMutation2.mutate()}
-                                disabled={declineMutation2.isPending || booking2.status != "CONFLICTING"}
+                                disabled={declineMutation2.isPending || booking2.status !== "CONFLICTING"}
                                 className="w-full px-4 py-2 text-sm font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
                             >
                                 Decline Booking {bookingId2}

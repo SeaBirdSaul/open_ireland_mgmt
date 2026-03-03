@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 
-const ROLE_OPTIONS = ['Admin', 'Approver', 'Viewer'];
+const ROLE_OPTIONS = ['admin', 'approver', 'viewer'];
 
 function validateField(name, value){
   switch (name) {

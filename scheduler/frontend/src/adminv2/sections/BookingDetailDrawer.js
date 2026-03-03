@@ -147,7 +147,7 @@ export default function BookingDetailDrawer({ groupId, open, onClose }) {
   const data = bookingQuery.data;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-0 z-[100] flex justify-end">
       <div
         className="fixed inset-0 bg-black/40"
         onClick={onClose}
