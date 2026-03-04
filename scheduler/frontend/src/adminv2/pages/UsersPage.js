@@ -8,7 +8,7 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { fetchUsers, inviteUser, updateUserRole, updateUserStatus, fetchInvitations, approveInvitation, rejectInvitation } from '../api';
+import { fetchUsers, inviteUser, updateUserRole, updateUserStatus, fetchInvitations, approveInvitation, rejectInvitation, deleteUser } from '../api';
 import DataTable from '../components/DataTable';
 import FilterBar from '../components/FilterBar';
 import { useToastContext } from '../../contexts/ToastContext';
@@ -42,17 +42,18 @@ export default function UsersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToastContext();
   const queryClient = useQueryClient();
-  const { permissions } = useAdminContext();
+  const { permissions, role: roleSession } = useAdminContext();
+  const isSuperAdmin = String(roleSession || '').toLowerCase() === 'super admin';
 
-  const role = searchParams.get('role') || undefined;
+  const roleFilter = searchParams.get('role') || undefined;
   const status = searchParams.get('status') || undefined;
 
   const view = searchParams.get('view') || 'users';
   const invitationStatus = searchParams.get('invStatus') || undefined;
   
   const usersQuery = useQuery({
-    queryKey: ['admin-users', { role, status }],
-    queryFn: () => fetchUsers({ role, status }),
+    queryKey: ['admin-users', { roleFilter, status }],
+    queryFn: () => fetchUsers({ roll: roleFilter, status }),
     keepPreviousData: true,
   });
 
@@ -123,6 +124,16 @@ export default function UsersPage() {
       await queryClient.invalidateQueries({ queryKey: ['admin-invitations'] });
     },
     onError: (err) => toast.error(err?.message || 'Unable to reject invitation.'),
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: (userId) => deleteUser(userId),
+    onSuccess: async () => {
+      toast.success('User deleted.');
+      await queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      selection.clear()
+    },
+    onError: (err) => toast.error(err?.message || 'Unable to delete user.'),
   });
 
   const columns = useMemo(
@@ -226,7 +237,7 @@ export default function UsersPage() {
   const filterChips = useMemo(() => {
     const chips = [];
     ROLE_TABS.forEach((tab) => {
-      const isActive = (role || '') === tab.key;
+      const isActive = (roleFilter || '') === tab.key;
       chips.push({
         key: `role-${tab.key || 'all'}`,
         label: tab.label,
@@ -257,7 +268,7 @@ export default function UsersPage() {
       });
     }
     return chips;
-  }, [role, status, searchParams, setSearchParams]);
+  }, [roleFilter, status, searchParams, setSearchParams]);
 
   return (
     <div className="space-y-6">
@@ -349,6 +360,24 @@ export default function UsersPage() {
                     >
                       Set status
                     </button>
+                    {isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ids = Array.from(selection.state.ids);
+                          if (ids.length !== 1){
+                            toast.error('Select exactly one user to delete.');
+                            return;
+                          }
+                          const confirmed = window.confirm('Delete this user permanently? This cannot be undone.');
+                          if (!confirmed) return;
+                          deleteUserMutation.mutate(ids[0]);
+                        }}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-md bg-red-600 text-white hover:bg-red-700"
+                      >
+                        Delete user
+                      </button>
+                    )}
                   </div>
                 )
               : null

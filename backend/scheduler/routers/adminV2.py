@@ -14,7 +14,7 @@ import secrets
 from backend.scheduler import schemas
 from backend.core.deps import get_db
 from backend.scheduler import models
-from backend.scheduler.routers.admin import admin_required
+from backend.scheduler.routers.admin import admin_required, super_admin_required
 from backend.core.hash import hash_password
 from backend.scheduler.services.invitations import accept_invitation_record, serialize_invitation
 
@@ -34,8 +34,8 @@ def get_session(request: Request, db: Session = Depends(get_db)):
     # Minimal shape expected by tests
     return {
         "user": {"username": user.username},
-        "role": "super admin",
-        "status": "active",
+        "role": user.role,
+        "status": user.status,
         "permissions": {
             "bookings:read": True,
             "settings:write": True,
@@ -504,7 +504,7 @@ def update_user_status(user_id: int, payload: schemas.AdminUserStatusUpdateReque
     if not user:
         raise HTTPException(status_code=404, detials="User not found")
     
-    new_status = payload.status.value if hasattr(payload.status, "value") else str(pauload.status)
+    new_status = payload.status.value if hasattr(payload.status, "value") else str(payload.status)
 
     user.status = new_status
     
@@ -599,3 +599,30 @@ def get_booking_group_details(group_id: str, request: Request, db: Session = Dep
             for b in rows
         ],
     }
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
+    super_admin_required(request, db)
+
+    acting_user_id = request.session.get("user_id")
+    if acting_user_id == user_id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account.")
+
+    user = db.query(models.User).get(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Delete all relevant DB entries to avoid FK errors
+    db.query(models.Booking).filter(models.Booking.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.BookingFavorite).filter(models.BookingFavorite.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.Topology).filter(models.Topology.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.AdminRole).filter(models.AdminRole.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.AdminAuditLog).filter(models.AdminAuditLog.actor_id == user_id).delete(synchronize_session=False)
+    db.query(models.DeviceOwnership).filter(
+        (models.DeviceOwnership.owner_id == user_id) | (models.DeviceOwnership.assigned_by == user_id)
+    ).delete(synchronize_session=False)
+    db.query(models.AdminInvitation).filter(models.AdminInvitation.invited_by == user_id).delete(synchronize_session=False)
+
+    db.delete(user)
+    db.commit()
+    return {"user_id":  user_id, "deleted": True}

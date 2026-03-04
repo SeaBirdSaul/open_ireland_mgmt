@@ -89,6 +89,19 @@ def admin_required(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status=403, detail="Account is inactive")
     if (user.role or "").lower() not in {"admin", "super admin"}:
         raise HTTPException(status=403, detail="Admin privileges required")
+
+def super_admin_required(request: Request, db: Session = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    user = db.query(models.User).get(user_id)
+    if not user:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    if (user.status or "").lower() != "active":
+        raise HTTPException(status_code=403, detail="Account is inactive")
+    if (user.role or "").lower() != "super admin":
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
     
 @router.get("/checkAdminSession")
 def get_session(request: Request, db: Session = Depends(get_db)):

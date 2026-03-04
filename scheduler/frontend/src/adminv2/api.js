@@ -226,3 +226,7 @@ export function globalSearch(params = {}) {
 export function fetchBookingGroupDetail(groupId) {
   return adminRequest(`/admin/v2/bookings/group/${groupId}`, { method: 'GET' });
 }
+
+export function deleteUser(userId) {
+  return adminRequest(`/admin/v2/users/${userId}`, { method: 'DELETE' });
+}
