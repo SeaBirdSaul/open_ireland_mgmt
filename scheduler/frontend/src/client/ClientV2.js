@@ -17,6 +17,7 @@ import { useLiveUpdates } from '../hooks/useLiveUpdates';
 import AccessibilityMenu from '../components/AccessibilityMenu';
 import { fetchGroupedBookings } from '../services/bookingGroupsService';
 import StatusUpdate from './v2/StatusUpdatePopup';
+import { createPortal } from 'react-dom';
 const ParticleBackground = lazy(() => import('../components/ParticleBackground'));
 
 const SIDEBAR_PREFERENCE_STORAGE_KEY = 'scheduler_filters_sidebar_open';
@@ -41,12 +42,13 @@ function ClientV2Inner() {
   const hasInitialized = useRef(false);
 
   const [darkMode, setDarkMode] = useState(false);
-  const [authModal, setAuthModal] = useState(null); // 'login' | 'register' | null
+  const [authModal, setAuthModal] = useState(null); // 'login' | 'register' | 'forgotRequest' | 'forgotConfirm' | null
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [logoutPending, setLogoutPending] = useState(false);
   const { setWeekStart, initializeDefaultTemplates } = useSchedulerStore();
   const [isFiltersOpen, setIsFiltersOpen] = useState(true);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [resetTokenFromUrl, setResetTokenFromUrl] = useState('');
   const [particlesEnabled, setParticlesEnabled] = useState(() => {
     const saved = localStorage.getItem('particlesEnabled');
     return saved !== null ? saved === 'true' : false; // Default to false
@@ -232,6 +234,24 @@ function ClientV2Inner() {
       safeRefreshAuth();
     }
   }, [safeRefreshAuth]);
+
+  // Password reset 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const token = params.get('reset_token');
+    if (!token || authenticated) return;
+
+    setResetTokenFromUrl(token);
+    setAuthModal('forgotConfirm');
+
+    // removes token from URL 
+    params.delete('reset_token');
+    const nextSearch = params.toString();
+    navigate(
+      `${location.pathname}${nextSearch ? `?${nextSearch}`: ''}${location.hash || ''}`,
+      { replace: true, state: location.state || null }
+    );
+  }, [location.pathname, location.search, location.hash, location.state, authenticated, navigate]);
 
   const applyDarkMode = (enable) => {
     if (enable) {
@@ -457,6 +477,86 @@ function ClientV2Inner() {
     [toast, safeRefreshAuth]
   );
 
+  const handlePasswordResetRequest = useCallback(
+    async ({ email }) => {
+      if (!email) {
+        toast.error('Email is required.');
+        return;
+      }
+
+      setAuthSubmitting(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/auth/password-reset/request`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim() }),
+        });
+
+        if (!res.ok && res.status !== 202) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.detail || 'Unable to request password reset.');
+        }
+
+        toast.success('If that account exists, a reset link has been sent.')
+        setAuthModal('forgotConfirm');
+      } catch (err) {
+        toast.error(err.message || 'Unable to request password reset.');
+      } finally {
+        setAuthSubmitting(false);
+      }
+    }, [toast]
+  );
+
+  const handlePasswordResetConfirm = useCallback(
+    async ({ token, password, confirmPassword }) => {
+      if (!token || !password || !confirmPassword) {
+        toast.error('Both password fields are required.');
+        return;
+      }
+      if (password.length < 8) {
+        toast.error('Password must be at least 8 characters long.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        toast.error('Passwords do not match.');
+        return;
+      }
+
+      setAuthSubmitting(true);
+      try {
+        const hashedPassword = CryptoJS.SHA256(password).toString();
+        const hashedConfirm = CryptoJS.SHA256(confirmPassword).toString();
+
+        const res = await fetch(`${API_BASE_URL}/auth/password-reset/confirm`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: token.trim(),
+            new_password: hashedPassword,
+            new_password2: hashedConfirm,
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.detail || 'Unable to reset password.');
+        }
+
+        const data = await res.json().catch(() => ({}));
+        toast.success(data?.message || 'Password reset successful.');
+        setResetTokenFromUrl('');
+        setAuthModal('login');
+        navigate('/client', { replace: true })
+      }catch (err) {
+        toast.error(err.message || 'Unable to reset password.');
+      } finally {
+        setAuthSubmitting(false);
+      }
+    }, [toast]
+  );
+
   const handleLogout = useCallback(async () => {
     setLogoutPending(true);
     try {
@@ -474,6 +574,8 @@ function ClientV2Inner() {
       const data = await res.json().catch(() => ({}));
       toast.success(data?.message || 'Signed out successfully.');
       clearAuth();
+      await safeRefreshAuth();
+      navigate('/client', { replace: true });
     } catch (err) {
       toast.error(err.message || 'Unable to sign out.');
     } finally {
@@ -766,21 +868,28 @@ function ClientV2Inner() {
           submitting={authSubmitting}
           onClose={() => setAuthModal(null)}
           onSwitchMode={() => setAuthModal((prev) => (prev === 'login' ? 'register' : 'login'))}
+          onForgotPassword={() => setAuthModal('forgotRequest')}
+          onBackToLogin={() => setAuthModal('login')}
+          onBackToResetRequest={() => setAuthModal('forgotRequest')}
           onLogin={handleLoginSubmit}
           onRegister={handleRegisterSubmit}
+          onRequestReset={handlePasswordResetRequest}
+          onConfirmReset={handlePasswordResetConfirm}
+          initialResetToken={resetTokenFromUrl}
         />
       )}
     </>
   );
 }
 
-function AuthModal({ mode, onClose, onSwitchMode, onLogin, onRegister, submitting }) {
+function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogin, onBackToResetRequest, onLogin, onRegister, onRequestReset, onConfirmReset, initialResetToken, submitting }) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
@@ -793,185 +902,146 @@ function AuthModal({ mode, onClose, onSwitchMode, onLogin, onRegister, submittin
     setConfirmPassword('');
     setShowPassword(false);
     setShowConfirmPassword(false);
+
+    if (mode === 'forgotConfirm'){
+      setResetToken(initialResetToken || '');
+    } else {
+      setResetToken('');
+    }
   }, [mode]);
 
   const handleSubmit = (event) => {
     event.preventDefault();
     if (mode === 'login') {
       onLogin({ username, password });
-    } else {
+    }
+    if (mode === 'register') {
       onRegister({ username, email, firstName, lastName, password, confirmPassword });
+      return;
+    }
+    if (mode === 'forgotRequest') {
+      onRequestReset({ email });
+      return;
+    }
+    if (mode === 'forgotConfirm') {
+      if (!resetToken) {
+        onBackToResetRequest();
+        return;
+      }
+      onConfirmReset({ token: resetToken, password, confirmPassword });
+      return;
     }
   };
 
+  const title = 
+    mode === 'login' ? 'Sign In'
+    : mode === 'register' ? 'Create Account'
+    : mode === 'forgotRequest' ? 'Reset Password'
+    : 'Complete Password Reset';
+
+  const submitLabel =
+    submitting ? 'Please wait...'
+    : mode === 'login' ? 'Sign In'
+    : mode === 'register' ? 'Create Account'
+    : mode === 'forgotRequest' ? 'Reset Password'
+    : 'Reset Password';
+
+  const isRegister = mode === 'register';
+  const isForgotRequest = mode === 'forgotRequest';
+  const isForgotConfirm = mode === 'forgotConfirm';
+  const isLogin = mode === 'login';
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" onClick={onClose} role="dialog" aria-modal="true">
       <div
         className="w-full max-w-xl rounded-2xl glass-panel shadow-2xl border border-gray-200/60 dark:border-gray-700/60 backdrop-blur"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-200/70 dark:border-gray-700/70 px-6 py-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            {mode === 'login' ? 'Sign In' : 'Create Account'}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-100 transition-colors"
-            aria-label="Close modal"
-          >
-            ✕
-          </button>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+          <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-100 transition-colors" aria-label="Close modal">✕</button>
         </div>
 
         <form onSubmit={handleSubmit} className="px-6 py-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-username">
-              Username
-            </label>
-            <input
-              id="auth-username"
-              type="text"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
-              style={{ '--tw-ring-color': `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` }}
-              onFocus={(e) => e.target.style.setProperty('--tw-ring-color', `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`)}
-              required
-              autoFocus
-            />
-          </div>
-
-          {mode === 'register' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor='auth-first-name'>
-                  First Name
-                </label> 
-                <input 
-                  id="auth-first-name"
-                  type="text"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
-                  style={{ '--tw-ring-color': `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` }}
-                  onFocus={(e) => e.target.style.setProperty('--tw-ring-color', `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`)}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor='auth-last-name'>
-                  Last Name
-                </label> 
-                <input 
-                  id="auth-last-name"
-                  type="text"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
-                  style={{ '--tw-ring-color': `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` }}
-                  onFocus={(e) => e.target.style.setProperty('--tw-ring-color', `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`)}
-                  required
-                />
-              </div>
-            </div>
-          )}
-
-          {mode === 'register' && (
+          {(isLogin || isRegister) && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">
-                Email
-              </label>
-              <input
-                id="auth-email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
-                style={{ '--tw-ring-color': `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` }}
-                onFocus={(e) => e.target.style.setProperty('--tw-ring-color', `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`)}
-                placeholder="you@example.com"
-              />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-username">Username</label>
+              <input id="auth-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2" required autoFocus />
             </div>
           )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-password">
-              Password
-            </label>
-            <div className="relative">
-              <input
-                id="auth-password"
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="w-full glass-input rounded-md px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((prev) => !prev)}
-                className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? '🙈' : '👁️'}
-              </button>
+          {(isRegister || isForgotRequest) && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">Email</label>
+              <input id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2" placeholder="you@example.com" required />
             </div>
-          </div>
+          )}
 
-          {mode === 'register' && (
+          {isRegister && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="First Name" className="w-full glass-input rounded-md px-3 py-2 text-sm" required />
+              <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Last Name" className="w-full glass-input rounded-md px-3 py-2 text-sm" required />
+            </div>
+          )}
+
+          {(isLogin || isRegister || isForgotConfirm) && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-password">
+                {isForgotConfirm ? 'New Password' : 'Password'}
+              </label>
+              <input id="auth-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm" required />
+            </div>
+          )}
+
+          {(isRegister || isForgotConfirm) && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-confirm-password">
-                Confirm Password
+                {isForgotConfirm ? 'Confirm New Password' : 'Confirm Password'}
               </label>
-              <div className="relative">
-                <input
-                  id="auth-confirm-password"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  className="w-full glass-input rounded-md px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword((prev) => !prev)}
-                  className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                  aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
-                >
-                  {showConfirmPassword ? '🙈' : '👁️'}
-                </button>
-              </div>
+              <input id="auth-confirm-password" type={showConfirmPassword ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm" required />
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full glass-button flex items-center justify-center py-2 text-sm font-semibold uppercase tracking-wide disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {submitting ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
+          {/* {isForgotConfirm && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-reset-token">Reset Token</label>
+              <input id="auth-reset-token" type="text" value={resetToken} onChange={(e) => setResetToken(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm" placeholder="Paste token from email" required />
+            </div>
+          )} */}
+
+          <button type="submit" disabled={submitting} className="w-full glass-button flex items-center justify-center py-2 text-sm font-semibold uppercase tracking-wide disabled:opacity-70 disabled:cursor-not-allowed">
+            {submitLabel}
           </button>
         </form>
 
         <div className="border-t border-gray-200/60 dark:border-gray-700/60 px-6 py-4 text-sm text-center text-gray-600 dark:text-gray-300">
-          {mode === 'login' ? (
+          {isLogin && (
             <>
-              Need an account?{' '}
+              <button type="button" onClick={onForgotPassword} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Forgot password?
+              </button>
               <button type="button" onClick={onSwitchMode} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
                 Register
               </button>
             </>
-          ) : (
+          )}
+          {isRegister && (
+            <button type="button" onClick={onSwitchMode} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+              Sign in
+            </button>
+          )}
+          {isForgotRequest && (
+            <button type="button" onClick={onBackToLogin} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+              Back to Sign in
+            </button>
+          )}
+          {isForgotConfirm && (
             <>
-              Already have an account?{' '}
-              <button type="button" onClick={onSwitchMode} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
-                Sign in
+              <button type="button" onClick={onBackToResetRequest} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Request new email
+              </button>
+              <button type="button" onClick={onBackToLogin} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+                Back to Sign in
               </button>
             </>
           )}

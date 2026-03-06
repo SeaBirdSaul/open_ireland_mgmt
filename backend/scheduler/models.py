@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     Boolean,
     JSON,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -251,3 +252,21 @@ class AdminInvitation(Base):
     accepted_at = Column(DateTime, nullable=True)
 
     inviter = relationship("User")
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key = True, index = True)
+    user_id = Column(Integer, ForeignKey("user_table.id"), nullable = False, index = True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    consumed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    requested_ip = Column(String(64), nullable=True)
+    requested_user_agent = Column(String(512), nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("ix_password_reset_user_active", "user_id", "consumed_at", "expires_at"),
+    )

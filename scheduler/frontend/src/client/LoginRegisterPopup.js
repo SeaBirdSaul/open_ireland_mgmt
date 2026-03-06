@@ -17,10 +17,18 @@ export default function LoginRegisterPopup({
     onSignOutSuccess
 }) {
     const [mode, setMode] = useState('login');
+    const [prefillToken, setPrefillToken] = useState('');
 
     useEffect(() => {
         if (show && !userName) {
-            setMode('login');
+            const token = new URLSearchParams(window.location.search).get('reset_token') || '';
+            if (token){
+                setMode('forgotConfirm');
+                setPrefillToken(token);
+            } else {
+                setMode('login');
+                setPrefillToken('');
+            }
         }
     }, [show, userName]);
 
@@ -135,7 +143,7 @@ export default function LoginRegisterPopup({
                 credentials: 'include'
             });
             if (!res.ok) {
-                const errData = await res.json();
+                const errData = await res.json().catch(() => ({}));
                 throw new Error(errData.detail || 'Register failed');
             }
             const data = await res.json();
@@ -143,7 +151,76 @@ export default function LoginRegisterPopup({
             onClose();
             alert('Register successfully');
         } catch (err) {
-            alert(err.message);
+            alert(err.message || 'Register failed');
+        }
+    };
+
+    const handlePasswordResetRequest = async (email) => {
+        if (!email) {
+            alert('Email is required');
+            return;
+        }
+
+        try {
+            const res = await fetch(`${API_BASE_URL}/auth/password-reset/request`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+                credentials: 'include',
+            });
+
+            if (!res.ok && res.status!== 202) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.detail || 'Unable to request password reset.');
+            }
+
+            alert('If the account exists, a reset link has been sent.');
+            setMode('forgotConfirm');
+        } catch (err) {
+            alert(err.message || 'Unable to request password reset');
+        }
+    };
+
+    const handlePasswordResetConfirm = async (token, pass1, pass2) => {
+        if (!token || !pass1 || !pass2){
+            alert('All fields are required');
+            return;
+        }
+        if (pass1.length < 8){
+            alert('Password must be at least 8 characters');
+            return;
+        }
+        if (pass1 !== pass2){
+            alert('Passwords do not match');
+            return;
+        }
+
+        try{
+            const hashedPass1 = CryptoJS.SHA256(pass1).toString();
+            const hashedPass2 = CryptoJS.SHA256(pass2).toString();
+
+            const res = await fetch(`${API_BASE_URL}/auth/password-reset/confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.toString({
+                    token,
+                    new_password: hashedPass1,
+                    new_password2: hashedPass2,
+                }),
+                credentials: 'include',
+            });
+
+            if (!res.ok) {
+                const errData = await res.join().catch(() => ({}));
+                throw new Error(errData.detail || 'Unable to reset password');
+            }
+            
+            const data = await res.json();
+            alert(data.message || 'Password reset successful');
+            setMode('login');
+            setPrefillToken('');
+        } catch (err) {
+            alert(err.message || 'Unable to reset password');
         }
     };
 
@@ -182,10 +259,25 @@ export default function LoginRegisterPopup({
     return (
         <div className="popup-overlay" onClick={onClose}>
             <div className="popup-panel" onClick={e => e.stopPropagation()}>
-                {mode === 'login' ? (
-                    <LoginForm onSwitch={switchMode} onLogin={handleLogin} />
-                ) : (
+                {mode === 'login' && (
+                    <LoginForm onSwitch={switchMode} onLogin={handleLogin} onForgot={() => setMode('forgotRequest')} />
+                )}
+                {mode === 'register' && (
                     <RegisterForm onSwitch={switchMode} onRegister={handleRegister} />
+                )}
+                {mode === 'forgotRequest' && (
+                    <ForgotPasswordRequestForm
+                        onSubmit={handlePasswordResetRequest}
+                        onBackToLogin={() => setMode('login')}
+                    />
+                )}
+                {mode == 'forgotConfirm' && (
+                    <ForgotPasswordConfirmForm
+                        initialToken={prefillToken}
+                        onSubmit={handlePasswordResetConfirm}
+                        onBackToRequest={() => setMode('forgotRequest')}
+                        onBackToLogin={() => setMode('login')}
+                    />
                 )}
             </div>
         </div>
@@ -193,12 +285,10 @@ export default function LoginRegisterPopup({
 }
 
 // Login page
-function LoginForm({ onSwitch, onLogin }) {
+function LoginForm({ onSwitch, onLogin, onForgot }) {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
-
-    const handleSubmit = () => onLogin(username, password);
 
     return (
         <div>
@@ -224,7 +314,8 @@ function LoginForm({ onSwitch, onLogin }) {
                 />
             </div>
 
-            <button onClick={handleSubmit}>Sign in</button>
+            <button onClick={() => onLogin(username, password)}>Sign in</button>
+            <div className='switch-link' onClick={onForgot}>Forgot Password?</div>
             <div className="switch-link" onClick={onSwitch}>
                 No account? Please Register
             </div>
@@ -243,8 +334,6 @@ function RegisterForm({ onSwitch, onRegister }) {
     const [showPassword1, setShowPassword1] = useState(false);
     const [showPassword2, setShowPassword2] = useState(false);
     const [discordId, setDiscordId] = useState("");
-
-    const handleSubmit = () => onRegister(username, email, firstName, lastName, pass1, pass2, discordId);
 
     return (
         <div>
@@ -316,10 +405,66 @@ function RegisterForm({ onSwitch, onRegister }) {
                 />
             </div>
 
-            <button onClick={handleSubmit}>Complete</button>
+            <button onClick={() => onRegister(username, email, firstName, lastName, pass1, pass2, discordId)}>Complete</button>
             <div className="switch-link" onClick={onSwitch}>
                 Already have an account? Please Sign in
             </div>
+        </div>
+    );
+}
+
+function ForgotPasswordConfirmForm({ initialToken, onSubmit, onBackToRequest, onBackToLogin }) {
+    const [token, setToken] = useState(initialToken || '');
+    const [pass1, setPass1] = useState('');
+    const [pass2, setPass2] = useState('');
+    const [showPassword1, setShowPassword1] = useState(false);
+    const [showPassword2, setShowPassword2] = useState(false);
+    
+    return (
+        <div>
+        <div className="popup-title">Complete Reset</div>
+
+        <div className="popup-title">Reset Token:</div>
+        <input
+            type="text"
+            value={token}
+            onChange={e => setToken(e.target.value)}
+            placeholder="Paste reset token"
+        />
+
+        <div className="popup-title">New Password:</div>
+        <div className="password-container">
+            <input
+            type={showPassword1 ? 'text' : 'password'}
+            value={pass1}
+            onChange={e => setPass1(e.target.value)}
+            />
+            <img
+            className="toggle-password-icon"
+            src={showPassword1 ? hidePasswordIcon : showPasswordIcon}
+            alt="toggle password 1"
+            onClick={() => setShowPassword1(!showPassword1)}
+            />
+        </div>
+
+        <div className="popup-title">Confirm New Password:</div>
+        <div className="password-container">
+            <input
+            type={showPassword2 ? 'text' : 'password'}
+            value={pass2}
+            onChange={e => setPass2(e.target.value)}
+            />
+            <img
+            className="toggle-password-icon"
+            src={showPassword2 ? hidePasswordIcon : showPasswordIcon}
+            alt="toggle password 2"
+            onClick={() => setShowPassword2(!showPassword2)}
+            />
+        </div>
+
+        <button onClick={() => onSubmit(token, pass1, pass2)}>Reset password</button>
+        <div className="switch-link" onClick={onBackToRequest}>Need a new reset email?</div>
+        <div className="switch-link" onClick={onBackToLogin}>Back to Sign in</div>
         </div>
     );
 }

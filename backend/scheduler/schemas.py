@@ -8,6 +8,7 @@ from pydantic import BaseModel, validator, IPvAnyAddress, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from enum import Enum
+import re
 
 
 # ================== User Part ==================
@@ -53,6 +54,32 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=200)
+
+    @validator("email")
+    def validate_email(cls, v):
+        email = v.strip().lower()
+        if "@" not in email or "." not in email.split("@")[-1]:
+            raise ValueError("Invalid email format")
+        return email
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(min_length=20, max_length=512)
+    new_password: str = Field(min_length=64, max_length=64) # Pre hased in SHA256 hex from fronted
+    new_password2: str = Field(min_length=64, max_length=64) # Pre hased in SHA256 hex from fronted
+
+    @validator("new_password")
+    def validate_sha256_password(cls, v):
+        if not re.fullmatch(r"[a-f0-9]{64}", v):
+            raise ValueError("Password must be SHA256 hex digest")
+        return v
+    
+    @validator("new_password2")
+    def password_match(cls, v, values, **kwargs):
+        if "new_password" in values and v != values["new_password"]:
+            raise ValueError("Passwords do now match.")
+        return v
 
 # ================== Booking Part ==================
 class BookingItem(BaseModel):
@@ -747,3 +774,4 @@ class ConfigurationRecommendation(BaseModel):
 class TopologySuggestResponse(BaseModel):
     recommendations: List[ConfigurationRecommendation]
     total_recommendations: int
+

@@ -12,6 +12,7 @@ from fastapi import (
     Response,
     BackgroundTasks,
     Query,
+    Body,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -23,6 +24,7 @@ from sqlalchemy import or_, and_, text, bindparam, inspect
 from sqlalchemy.orm import Session
 
 from backend.scheduler import models, schemas
+from pydantic import BaseModel, EmailStr, Field, validator
 import asyncio
 import os
 import logging
@@ -45,7 +47,7 @@ from backend.scheduler.schemas import (
     BookingFavoriteUpdate,
 )
 
-from datetime import datetime
+from datetime import datetime, timezone
 from datetime import timedelta
 import uuid
 from zoneinfo import ZoneInfo
@@ -58,10 +60,15 @@ from backend.scheduler.routers.admin_debug import router as admin_debug_router
 from backend.scheduler.routers.control_panel import router as control_panel_router
 # from backend.scheduler.services.invitations import router as invitations_router
 from backend.core.discord_utils import send_booking_created_notification
+from backend.scheduler.services.auth_tokens import generate_reset_token, hash_token, token_ttl_minutes
+from backend.scheduler.services.mailer import send_password_reset_email
 
 # Import inventory management router
 from backend.inventory.router import router as inventory_router
 from backend.inventory import models as inventory_models  # noqa: F401
+
+import smtplib
+from email.message import EmailMessage
 
 _TZ = ZoneInfo("Europe/Dublin")
 
@@ -388,6 +395,12 @@ def _delete_device_booking_rows(db: Session, booking_ids: Iterable[int]) -> None
             "Unable to delete device_booking rows for booking_ids=%s: %s", ids, exc
         )
 
+'''
+Helpers for password reset emails and the such
+'''
+def _build_reset_link(raw_token: str) -> str:
+    app_public_url = os.getenv("APP_PUBLIC_URL", "http://localhost:25002")
+    return f"{app_public_url}/client?reset_token={raw_token}"
 
 # ================== Check Session ==================
 '''
@@ -463,6 +476,83 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
     }
 
+# ======================== Password Reset ===================================
+
+'''
+'''
+@app.post("/auth/password-reset/request")
+def password_reset_request(payload: schemas.PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
+    generic_response = {"message": "If that account exists, a reset link has been sent."}
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.email == payload.email)
+        .first()
+    )
+    if not user or (user.status or "").lower() != "active":
+        return generic_response
+    
+    now = datetime.utcnow()
+
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user.id,
+        models.PasswordResetToken.consumed_at.is_(None),
+    ).update(
+        {"consumed_at": now},
+        synchronize_session=False,
+    )
+    
+    raw_token = generate_reset_token()
+    hashed_token = hash_token(raw_token)
+    token_row = models.PasswordResetToken(
+        user_id = user.id,
+        token_hash = hashed_token,
+        expires_at = now + timedelta(minutes = token_ttl_minutes()),
+        requested_ip = (request.client.host if request.client else None),
+        requested_user_agent = request.headers.get("user-agent"),
+    )
+    db.add(token_row)
+    db.commit()
+
+    try:
+        send_password_reset_email(
+            to_email = user.email,
+            reset_url = _build_reset_link(raw_token),
+            ttl_minutes = token_ttl_minutes(),
+        )
+    except Exception as exc:
+        logger.exception("Failed to send password reset email: %s", exc)
+    
+    return generic_response
+
+@app.post("/auth/password-reset/confirm")
+def password_reset_confirm(payload: schemas.PasswordResetConfirm, db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    token_hash = hash_token(payload.token)
+
+    token_row = (
+        db.query(models.PasswordResetToken)
+        .filter(models.PasswordResetToken.token_hash == token_hash)
+        .with_for_update()
+        .first()
+    )
+
+    if not token_row:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    if token_row.consumed_at is not None or token_row.expires_at < now:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    
+    user = db.query(models.User).get(token_row.user_id)
+    if not user or (user.status or "").lower() != "active":
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    
+    # Assuming that paylod.new_password is already hashed in SHA256 hex
+    user.password = hash_password(payload.new_password)
+    token_row.consumed_at = now
+    db.commit()
+
+    return {"message": "Password reset successful"}
+        
 
 '''
     Parameters:
@@ -657,7 +747,13 @@ def logout_user(request: Request, response: Response):
     request.session.clear()
 
     response = JSONResponse({"message": "Signed out successfully"})
-    response.delete_cookie("session_id")
+    response.delete_cookie(
+        key = "session_id",
+        path = "/",
+        samesite = "lax",
+        secure = False,  # Update to true if HTTPS
+        httponly=True,
+    )
     return response
 
 def record_logs(

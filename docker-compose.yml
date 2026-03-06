@@ -1,6 +1,14 @@
 version: "3.3"
 
 services:
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "8025:8025"  # web UI
+      - "1025:1025"  # smtp
+    networks:
+      - openireland-network
+
   backend:
     container_name: openireland-backend
     build:
@@ -11,6 +19,15 @@ services:
       - FRONTEND_URL=http://localhost:25002
       - DEBUG=True
       - DATABASE_URL=mysql+pymysql://local_user:password@host.docker.internal:13306/provdb_test
+      - SMTP_HOST=mailhog  # TestBed.Scheduler.com # example: smtp.example.com
+      - SMTP_PORT=1025
+      - SMTP_USE_TLS=false # switch to false laters
+      - SMTP_USERNAME=
+      - SMTP_PASSWORD=
+      - SMTP_FROM_EMAIL=no-reply@scheduler.com
+      - APP_PUBLIC_URL=http://localhost:25002
+      - PASSWORD_RESET_TTL_MINUTES=45
+      - PASSWORD_RESET_RATE_LIMIT_PER_HOUR=5
     volumes:
       - ./backend:/app/backend
     ports:

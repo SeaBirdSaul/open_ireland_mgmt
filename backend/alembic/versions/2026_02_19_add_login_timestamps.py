@@ -1,8 +1,8 @@
 """Add previous_login_at and last_login_at to user_table
 
-Revision ID: [auto_generated]
+Revision ID: 2026_02_19_add_login_timestamp
 Revises: [previous_migration_id]
-Create Date: [timestamp]
+Create Date: 2026-02-19
 
 """
 from alembic import op
