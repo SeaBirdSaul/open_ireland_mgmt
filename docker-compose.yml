@@ -28,6 +28,7 @@ services:
       - APP_PUBLIC_URL=http://localhost:25002
       - PASSWORD_RESET_TTL_MINUTES=45
       - PASSWORD_RESET_RATE_LIMIT_PER_HOUR=5
+      - EMAIL_VERIFY_TTL_MINUTES=60
     volumes:
       - ./backend:/app/backend
     ports:

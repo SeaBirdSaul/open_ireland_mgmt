@@ -61,7 +61,7 @@ from backend.scheduler.routers.control_panel import router as control_panel_rout
 # from backend.scheduler.services.invitations import router as invitations_router
 from backend.core.discord_utils import send_booking_created_notification
 from backend.scheduler.services.auth_tokens import generate_reset_token, hash_token, token_ttl_minutes
-from backend.scheduler.services.mailer import send_password_reset_email
+from backend.scheduler.services.mailer import send_password_reset_email, send_email_verification_email
 
 # Import inventory management router
 from backend.inventory.router import router as inventory_router
@@ -395,6 +395,7 @@ def _delete_device_booking_rows(db: Session, booking_ids: Iterable[int]) -> None
             "Unable to delete device_booking rows for booking_ids=%s: %s", ids, exc
         )
 
+# ================== Email Helpers ==========================
 '''
 Helpers for password reset emails and the such
 '''
@@ -402,6 +403,16 @@ def _build_reset_link(raw_token: str) -> str:
     app_public_url = os.getenv("APP_PUBLIC_URL", "http://localhost:25002")
     return f"{app_public_url}/client?reset_token={raw_token}"
 
+def _build_verify_link(raw_token: str) -> str:
+    app_public_url = os.getenv("APP_PUBLIC_URL", "http://localhost:25002")
+    return f"{app_public_url}/client?verify_token={raw_token}"
+
+def _email_verify_ttl_minutes() -> int:
+    try:
+        value = int(os.getenv("EMAIL_VERIFY_TTL_MINUTES", "60"))
+    except ValueError:
+        value = 60
+    return max(5, min(value, 1440))
 # ================== Check Session ==================
 '''
     Parameters:
@@ -552,6 +563,67 @@ def password_reset_confirm(payload: schemas.PasswordResetConfirm, db: Session = 
     db.commit()
 
     return {"message": "Password reset successful"}
+
+@app.post("/auth/email-verify/confirm")
+def email_verify_confirm(payload: schemas.EmailVerificationConfirm, db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    token_hash = hash_token(payload.token)
+
+    token_row = (
+        db.query(models.EmailVerificationToken)
+        .filter(models.EmailVerificationToken.token_hash == token_hash)
+        .with_for_update()
+        .first()
+    )
+    if not token_row:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+    if token_row.consumed_at is not None or token_row.expires_at < now:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+    user = db.query(models.User).get(token_row.user_id)
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+    user.status = "active"
+    token_row.consumed_at = now
+    db.commit()
+
+    return { "message": "Email verified successfully. You can now sign in."}
+
+@app.post ("/auth/email-verify/resend", status_code=202)
+def email_verify_resend(payload: schemas.EmailVerificationResend, request: Request, db: Session = Depends(get_db)):
+    generic = {"message": "If that account exists and is pending verification, a new verification email has been sent."}
+
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    if not user or (user.status or "").lower() != "pending_email_verification":
+        return generic
+    
+    now = datetime.utcnow()
+    db.query(models.EmailVerificationToken).filter(
+        models.EmailVerificationToken.user_id == user.id,
+        models.EmailVerificationToken.consumed_at.is_(None),
+    ).update({"consumed_at": now}, synchronize_session=False)
+
+    raw_token = generate_reset_token()
+    db.add(models.EmailVerificationToken(
+        user_id = user.id,
+        token_hash = hash_token(raw_token),
+        expires_at = now + timedelta(minutes = _email_verify_ttl_minutes()),
+        request_ip = (request.client.host if request and request.client else None),
+        requested_user_agent = (request.headers.get("user-agent") if request else None),
+    ))
+    db.commit()
+
+    try:
+        send_email_verification_email(
+            to_email = user.email,
+            verify_url = _build_verify_link(raw_token),
+            ttl_minutes = _email_verify_ttl_minutes(),
+        )
+    except Exception as exc:
+        logger.exception("Failed to resend verification email: %s", exc)
+    
+    return generic
         
 
 '''
@@ -629,7 +701,7 @@ def get_devices(request: Request, db: Session = Depends(get_db)):
     Use:
     - Registers a new user and starts a session.
 '''
-@app.post("/users/register", response_model=schemas.User)
+@app.post("/users/register", status_code=202)
 def register_user(
     user: schemas.UserCreate, db: Session = Depends(get_db), request: Request = None
 ):
@@ -641,6 +713,17 @@ def register_user(
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already taken.")
 
+    if user.email:
+        existing_email = db.query(models.User).filter(models.User.email == user.email).first()
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email already in use.")
+        
+    normalized_email = (user.email or "").strip().lower() or None
+
+    if normalized_email:
+        existing_email = db.query(models.User).filter(models.User.email == normalized_email).first()
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email is already in use.")
     # Hash the password
     # Client sends SHA256 hash, so we store bcrypt(SHA256) for security
     # This way verify_password(SHA256, bcrypt(SHA256)) will work
@@ -654,16 +737,40 @@ def register_user(
         lastName = user.lastName.strip(),
         password=hashed_pass,
         role = "viewer",
-        status="active",
+        status="pending_email_verification",
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    # Set the session
-    request.session["user_id"] = new_user.id
+    raw_token = generate_reset_token()
+    db.query(models.EmailVerificationToken).filter(
+        models.EmailVerificationToken.user_id == new_user.id,
+        models.EmailVerificationToken.consumed_at.is_(None),
+    ).update({"consumed_at": datetime.utcnow()}, synchronize_session=False)
 
-    return new_user
+    db.add(models.EmailVerificationToken(
+        user_id = new_user.id,
+        token_hash = hash_token(raw_token),
+        expires_at = datetime.utcnow() + timedelta(minutes = _email_verify_ttl_minutes()),
+        requested_ip = (request.client.host if request and request.client else None),
+        requested_user_agent = (request.headers.get("user-agent") if request else None),
+    ))
+    db.commit()
+
+    try:
+        send_email_verification_email(
+            to_email = new_user.email,
+            verify_url = _build_verify_link(raw_token),
+            ttl_minutes = _email_verify_ttl_minutes(),
+        )
+    except Exception as exc:
+        logger.exception("Failed to send verification email: %s", exc)
+
+    return {
+        "message": "Registration successful. Please verify your email.",
+        "requires_email_verification": True,
+    }
 
 
 # ================ User Login ================
@@ -716,7 +823,10 @@ def login_user(
     if not password_valid:
         raise HTTPException(status_code=400, detail="Invalid username or password")
     
-    if (user.status or "").lower() != "active":
+    status_value = (user.status or "").lower()
+    if status_value == "pending_email_verification":
+        raise HTTPException(status_code=403, detail="Email verification required")
+    if status_value != "active":
         raise HTTPException(status_code=403, detail="Account is inactive")
     now = datetime.now()
     user.previous_login_at = user.last_login_at
@@ -743,17 +853,13 @@ def login_user(
     - Clears the session and deletes the session cookie.
 '''
 @app.post("/logout")
-def logout_user(request: Request, response: Response):
+def logout_user(request: Request):
     request.session.clear()
 
+    # Update secure to true and httponly to false if HTTPS
     response = JSONResponse({"message": "Signed out successfully"})
-    response.delete_cookie(
-        key = "session_id",
-        path = "/",
-        samesite = "lax",
-        secure = False,  # Update to true if HTTPS
-        httponly=True,
-    )
+    response.delete_cookie("session_id", path="/", samesite="lax", secure=False, httponly=True)
+    response.set_cookie("session_id", "", max_age=0, expires=0, path="/", samesite="lax", secure=False, httponly=True)
     return response
 
 def record_logs(

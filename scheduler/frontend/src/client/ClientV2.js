@@ -42,13 +42,15 @@ function ClientV2Inner() {
   const hasInitialized = useRef(false);
 
   const [darkMode, setDarkMode] = useState(false);
-  const [authModal, setAuthModal] = useState(null); // 'login' | 'register' | 'forgotRequest' | 'forgotConfirm' | null
+  const [authModal, setAuthModal] = useState(null); // 'login' | 'register' | 'forgotRequest' | 'forgotConfirm' | 'verifyCionfirm' | 'verifyResend' | 'forgotSent' | null
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [logoutPending, setLogoutPending] = useState(false);
   const { setWeekStart, initializeDefaultTemplates } = useSchedulerStore();
   const [isFiltersOpen, setIsFiltersOpen] = useState(true);
   const [isNavigating, setIsNavigating] = useState(false);
   const [resetTokenFromUrl, setResetTokenFromUrl] = useState('');
+  const [verifyTokenFromUrl, setVerifyTokenFromUrl] = useState('');
+  const [verificationEmail, setVerificationEmail] = useState('');
   const [particlesEnabled, setParticlesEnabled] = useState(() => {
     const saved = localStorage.getItem('particlesEnabled');
     return saved !== null ? saved === 'true' : false; // Default to false
@@ -249,6 +251,22 @@ function ClientV2Inner() {
     const nextSearch = params.toString();
     navigate(
       `${location.pathname}${nextSearch ? `?${nextSearch}`: ''}${location.hash || ''}`,
+      { replace: true, state: location.state || null }
+    );
+  }, [location.pathname, location.search, location.hash, location.state, authenticated, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const token = params.get('verify_token');
+    if (!token || authenticated) return;
+
+    setVerifyTokenFromUrl(token);
+    setAuthModal('verifyConfirm');
+
+    params.delete('verify_token');
+    const nextSearch = params.toString();
+    navigate(
+      `${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${location.hash || ''}`,
       { replace: true, state: location.state || null }
     );
   }, [location.pathname, location.search, location.hash, location.state, authenticated, navigate]);
@@ -464,7 +482,13 @@ function ClientV2Inner() {
           throw new Error(message);
         }
 
-        await res.json();
+        const data = await res.json().catch(() => ({}));
+        if(data?.requires_email_verification) {
+          toast.success(data?.message || 'Registration successful. Please verify your email.');
+          setAuthModal('verifyResend');
+          setVerificationEmail(email || '');
+          return;
+        }
         toast.success('Account created successfully. You are now signed in.');
         setAuthModal(null);
         await safeRefreshAuth();
@@ -499,7 +523,7 @@ function ClientV2Inner() {
         }
 
         toast.success('If that account exists, a reset link has been sent.')
-        setAuthModal('forgotConfirm');
+        setAuthModal('forgotSent');
       } catch (err) {
         toast.error(err.message || 'Unable to request password reset.');
       } finally {
@@ -556,6 +580,72 @@ function ClientV2Inner() {
       }
     }, [toast]
   );
+
+  const handleEmailVerifyConfirm = useCallback(async ({ token }) => {
+    if (!token) {
+      toast.error('Verification token is missing.');
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/email-verify/confirm`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ token: token.trim() }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.detail || 'Unable to verify email.');
+      }
+
+      const data = await res.json().catch(() => ({}));
+      toast.success(data?.message || 'Email verified successfully.');
+      setVerifyTokenFromUrl('');
+      setAuthModal('login');
+      navigate('/client', { replace: true });
+    } catch (err) {
+      toast.error(err.message || 'Unable to verify email.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }, [toast, navigate]);
+
+  const handleEmailVerifyResend = useCallback(async ({ email }) => {
+    if (!email) {
+      toast.error('Email is required.');
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/email-verify/resend`, { 
+        method: 'POST',
+        credentials: 'include',
+        header: {
+          'Content-Type': 'application/json' ,
+        },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+
+      if (!res.ok && res.status !== 202) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.detail || 'Unable to resend verification email.');
+      }
+
+      const data = await res.json().catch(() => ({}));
+      toast.success(data?.message || 'Verification email sent.');
+      setAuthModal('verifyConfirm');
+    } catch (err) {
+      toast.error(err.message || 'Unable to resend verification email.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }, [toast]);
 
   const handleLogout = useCallback(async () => {
     setLogoutPending(true);
@@ -679,6 +769,7 @@ function ClientV2Inner() {
                         }
                       }}
                       disabled={(role !== "admin" && role !== "super admin") || isNavigating}
+                      hidden={(role !== "admin" && role !== "super admin") || isNavigating}
                       title={(role === "admin" || role === "super admin") ? 'Open Admin Panel' : 'Admin access required'}
                       className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                         (role === "admin" || role === "super admin")
@@ -871,18 +962,23 @@ function ClientV2Inner() {
           onForgotPassword={() => setAuthModal('forgotRequest')}
           onBackToLogin={() => setAuthModal('login')}
           onBackToResetRequest={() => setAuthModal('forgotRequest')}
+          onBackToVerifyResend={() => setAuthModal('verifyResend')}
           onLogin={handleLoginSubmit}
           onRegister={handleRegisterSubmit}
           onRequestReset={handlePasswordResetRequest}
           onConfirmReset={handlePasswordResetConfirm}
+          onVerifyConfirm={handleEmailVerifyConfirm}
+          onVerifyResend={handleEmailVerifyResend}
           initialResetToken={resetTokenFromUrl}
+          initialVerifyToken={verifyTokenFromUrl}
+          initialEmail={verificationEmail}
         />
       )}
     </>
   );
 }
 
-function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogin, onBackToResetRequest, onLogin, onRegister, onRequestReset, onConfirmReset, initialResetToken, submitting }) {
+function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogin, onBackToResetRequest, onBackToVerifyResend, onLogin, onRegister, onRequestReset, onConfirmReset, onVerifyConfirm, onVerifyResend, initialResetToken, initialVerifyToken, initialEmail, submitting }) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -892,6 +988,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
   const [resetToken, setResetToken] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [verifyToken, setVerifyToken] = useState('');
 
   useEffect(() => {
     setUsername('');
@@ -908,7 +1005,19 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
     } else {
       setResetToken('');
     }
-  }, [mode]);
+
+    if (mode === 'verifyResend') {
+      setEmail(initialEmail || '');
+    } else {
+      setEmail('');
+    }
+
+    if (mode === 'verifyConfirm') {
+      setVerifyToken(initialVerifyToken || '');
+    } else {
+      setVerifyToken('');
+    }
+  }, [mode, initialEmail, initialResetToken, initialVerifyToken]);
 
   const handleSubmit = (event) => {
     event.preventDefault();
@@ -931,20 +1040,48 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
       onConfirmReset({ token: resetToken, password, confirmPassword });
       return;
     }
+
+    if (mode === 'forgotSent') {
+      onBackToLogin();
+      return;
+    }
+
+    if (mode === 'verifyResend') {
+      onVerifyResend({ email });
+      return;
+    }
+
+    if (mode === 'verifyConfirm') {
+      if (!verifyToken) {
+        onBackToVerifyResend();
+        return;
+      }
+      onVerifyConfirm({ token: verifyToken });
+      return;
+    }
   };
+
+  const isForgotSent = mode === 'forgotSent';
+  const isVerifyResend = mode === 'verifyResend';
+  const isVerifyConfirm = mode === 'verifyConfirm';
 
   const title = 
     mode === 'login' ? 'Sign In'
     : mode === 'register' ? 'Create Account'
     : mode === 'forgotRequest' ? 'Reset Password'
-    : 'Complete Password Reset';
+    : mode === 'forgotConfirm' ? 'Complete Password Reset'
+    : mode === 'verifyResend' ? 'Verify Your Email'
+    : mode === 'forgotSent' ? 'Check Your Email'
+    : 'Complete Email Verification';
 
   const submitLabel =
     submitting ? 'Please wait...'
     : mode === 'login' ? 'Sign In'
     : mode === 'register' ? 'Create Account'
-    : mode === 'forgotRequest' ? 'Reset Password'
-    : 'Reset Password';
+    : mode === 'forgotRequest' ? 'Send reset email'
+    : mode === 'forgotConfirm' ? 'Reset Password'
+    : mode === 'verifyResend' ? 'Resend verification email'
+    : 'Verify Email';
 
   const isRegister = mode === 'register';
   const isForgotRequest = mode === 'forgotRequest';
@@ -970,7 +1107,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
             </div>
           )}
 
-          {(isRegister || isForgotRequest) && (
+          {(isRegister || isForgotRequest || isVerifyResend) && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">Email</label>
               <input id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2" placeholder="you@example.com" required />
@@ -1008,6 +1145,27 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
               <input id="auth-reset-token" type="text" value={resetToken} onChange={(e) => setResetToken(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm" placeholder="Paste token from email" required />
             </div>
           )} */}
+
+          {isForgotSent && (
+            <div className="text-sm text-gray-700 dark:text-gray-300">
+              If that account exists, we sent a password reset link. Please check your email inbox and spam folder.
+            </div>
+          )}
+
+          {isVerifyConfirm && (
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1' htmlFor='auth-verify-token'>Verification Token</label>
+              <input
+                id="auth-verify-token"
+                type="text"
+                value={verifyToken}
+                onChange={(e) => setVerifyToken(e.target.value)}
+                className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                placeholder='Paste token from email'
+                required
+              />
+            </div>
+          )}
 
           <button type="submit" disabled={submitting} className="w-full glass-button flex items-center justify-center py-2 text-sm font-semibold uppercase tracking-wide disabled:opacity-70 disabled:cursor-not-allowed">
             {submitLabel}

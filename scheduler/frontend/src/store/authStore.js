@@ -9,6 +9,8 @@ import { API_BASE_URL } from '../config/api';
 const UNAUTH_REFRESH_COOLDOWN_MS = 5000; // Timeout to prevent spamming refreshes
 let inUseRefresh = null;
 let lastUnauthAt = 0;
+let authEpoch = 0;
+let activeAuthAbortController = null;
 
 const useAuthStore = create((set, get) => ({
   // Auth state
@@ -19,6 +21,7 @@ const useAuthStore = create((set, get) => ({
   loading: true, // Initial loading state
   previousLoginAt: null,
   lastLoginAt: null,
+  authEpoch: 0,
 
   // Actions
   refreshAuth: async (retryCount = 0) => {
@@ -27,30 +30,35 @@ const useAuthStore = create((set, get) => ({
     }
     const state = get();
     const now = Date.now();
+    const startEpoch = get().authEpoch;
 
     if(retryCount === 0 && !state.authenticated && now - lastUnauthAt < UNAUTH_REFRESH_COOLDOWN_MS) {
+      if (get().authEpoch !== startEpoch) return;
       set({ loading: false });
       return;
     }
 
     inUseRefresh = (async () => {
+      if (get().authEpoch !== startEpoch) return;
       set({ loading: true });
       try {
         // Create abort controller for timeout
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        activeAuthAbortController = new AbortController();
+        const timeoutId = setTimeout(() => activeAuthAbortController.abort(), 10000); // 10 second timeout
         
         const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
           method: 'GET',
           credentials: 'include',
-          signal: controller.signal,
+          signal: activeAuthAbortController.signal,
         });
         
         clearTimeout(timeoutId);
+        activeAuthAbortController = null;
 
         // Handle network errors or non-OK responses
         if (!res.ok) {
           // 401/403 are expected for unauthenticated users, don't log as errors
+          if (get().authEpoch !== startEpoch) return;
           if (res.status === 401 || res.status === 403) {
             set({
               authenticated: false,
@@ -72,6 +80,7 @@ const useAuthStore = create((set, get) => ({
         }
         // Don't clear auth on transient errors - keep current state
         console.warn('Auth check failed with status:', res.status);
+        if (get().authEpoch !== startEpoch) return;
         set({ loading: false });
         return;
       }
@@ -82,11 +91,13 @@ const useAuthStore = create((set, get) => ({
       } catch (parseError) {
         console.error('Failed to parse auth response', parseError);
         // Don't clear auth on parse errors - might be transient
+        if (get().authEpoch !== startEpoch) return;
         set({ loading: false });
         return;
       }
-
+      
       if (data?.authenticated) {
+        if (get().authEpoch !== startEpoch) return;
         set({
           authenticated: true,
           userId: data.user_id,
@@ -97,6 +108,7 @@ const useAuthStore = create((set, get) => ({
           lastLoginAt: data.last_login_at || null,
         });
       } else {
+        if (get().authEpoch !== startEpoch) return;
         set({
           authenticated: false,
           userId: null,
@@ -124,20 +136,32 @@ const useAuthStore = create((set, get) => ({
         // After retries, don't clear auth - might be temporary network issue
         // Only clear if we're sure it's a permanent issue
         console.warn('Network error during auth check, keeping current auth state');
+        if (get().authEpoch !== startEpoch) return;
         set({ loading: false });
         return;
       }
       // For other errors, log but don't clear auth state
       console.error('Failed to refresh auth', err);
+      if (get().authEpoch !== startEpoch) return;
       set({ loading: false });
-    } finally { inUseRefresh = null; }
+    } finally { 
+      inUseRefresh = null;
+      activeAuthAbortController = null;
+    }
   })();
   return inUseRefresh;      
   },
 
   clearAuth: () => { 
     lastUnauthAt = Date.now();
+    authEpoch += 1;
+    if (activeAuthAbortController) {
+      activeAuthAbortController.abort();
+      activeAuthAbortController = null;
+    }
+    inUseRefresh = null;
     set({
+      authEpoch,
       authenticated: false,
       userId: null,
       username: null,

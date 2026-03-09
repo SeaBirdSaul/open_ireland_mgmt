@@ -28,7 +28,7 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     firstName = Column(String(200), nullable=False)
     lastName = Column(String(200), nullable=False)
-    email = Column(String(100), unique=True, nullable=True)
+    email = Column(String(100), unique=True, nullable=False)
     password = Column(String(100), nullable=False)
     role = Column(String(50), nullable=False)
     previous_login_at = Column(DateTime, nullable=True)
@@ -253,6 +253,7 @@ class AdminInvitation(Base):
 
     inviter = relationship("User")
 
+# ===================== Emails ============================
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
 
@@ -269,4 +270,22 @@ class PasswordResetToken(Base):
 
     __table_args__ = (
         Index("ix_password_reset_user_active", "user_id", "consumed_at", "expires_at"),
+    )
+
+class EmailVerificationToken(Base):
+    __tablename__ = "email_verification_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("user_table.id"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    consumed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    requested_ip = Column(String(64), nullable=True)
+    requested_user_agent = Column(String(512), nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("ix_email_verify_user_active", "user_id", "consumed_at", "expires_at"),
     )

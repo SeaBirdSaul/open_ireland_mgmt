@@ -392,6 +392,13 @@ def invite_user( payload: schemas.AdminUserInviteRequest, request: Request, db: 
     admin_required(request, db)
     inviter_id = request.session.get("user_id")
 
+    normalized_email = (payload.email or "").strip().lower() or None
+
+    if normalized_email:
+        existing_email  = db.query(models.User).filter(models.User.email == normalized_email)
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email is already in use.")
+
     token = secrets.token_hex(32)
     sha_password = hashlib.sha256(payload.password.encode("utf-8")).hexdigest()
     hashed_password = hash_password(sha_password)
@@ -622,6 +629,8 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
         (models.DeviceOwnership.owner_id == user_id) | (models.DeviceOwnership.assigned_by == user_id)
     ).delete(synchronize_session=False)
     db.query(models.AdminInvitation).filter(models.AdminInvitation.invited_by == user_id).delete(synchronize_session=False)
+    db.query(models.PasswordResetToken).filter(models.PasswordResetToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.EmailVerificationToken).filter(models.EmailVerificationToken.user_id == user_id).delete(synchronize_session=False)
 
     db.delete(user)
     db.commit()

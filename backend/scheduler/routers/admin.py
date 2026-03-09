@@ -35,6 +35,13 @@ def admin_register(admin: schemas.AdminCreate, db: Session = Depends(get_db), re
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already taken.")
 
+    normalized_email = (admin.email or "").strip().lower() or None
+
+    if normalized_email:
+        existing_email = db.query(models.User).filter(models.User.email == normalized_email)
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email is already in use.")
+
     # Hash the password
     hashed_pass = hash_password(admin.password)
 

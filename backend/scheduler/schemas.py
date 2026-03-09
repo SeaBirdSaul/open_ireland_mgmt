@@ -54,6 +54,7 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+# ================= Emails ========================
 class PasswordResetRequest(BaseModel):
     email: str = Field(min_length=3, max_length=200)
 
@@ -80,6 +81,19 @@ class PasswordResetConfirm(BaseModel):
         if "new_password" in values and v != values["new_password"]:
             raise ValueError("Passwords do now match.")
         return v
+
+class EmailVerificationConfirm(BaseModel):
+    token: str = Field(min_length=20, max_length=512)
+
+class EmailVerificationResend(BaseModel):
+    email: str = Field(min_length=3, max_length=200)
+
+    @validator("email")
+    def validate_email(cls, v):
+        email = v.strip().lower()
+        if "@" not in email or "." not in email.split("@")[-1]:
+            raise ValueError("Invalid email format")
+        return email
 
 # ================== Booking Part ==================
 class BookingItem(BaseModel):
