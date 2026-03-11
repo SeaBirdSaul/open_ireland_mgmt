@@ -14,6 +14,9 @@ from backend.core.deps import get_db
 from backend.core.hash import hash_password, verify_password
 from backend.core.discord_utils import send_admin_action_notification
 
+from fastapi.responses import JSONResponse
+from backend.scheduler.services.sessions import create_user_session, get_user_from_session_cookie, revoke_session_by_cookie
+
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 """
@@ -31,8 +34,12 @@ def admin_register(admin: schemas.AdminCreate, db: Session = Depends(get_db), re
         raise HTTPException(status_code=403, detail="Invalid admin secret")
     
      # Check the user name 
-    existing_user = db.query(models.User).filter(models.User.username == admin.username).first()
-    if existing_user:
+    existing_email = (
+        db.query(models.User)
+        .filter(models.User.email == normalized_email)
+        .first()
+    )
+    if existing_email:
         raise HTTPException(status_code=400, detail="Username already taken.")
 
     normalized_email = (admin.email or "").strip().lower() or None
@@ -58,9 +65,24 @@ def admin_register(admin: schemas.AdminCreate, db: Session = Depends(get_db), re
     db.refresh(new_user)
 
     # Store the user_id in Session
-    request.session["user_id"] = new_user.id
-
-    return new_user
+    session_id = create_user_session(db, new_user.id, request)
+    response = JSONResponse({
+        "id": new_user.id,
+        "username": new_user.username,
+        "email": new_user.email,
+        "role": new_user.role,
+        "status": new_user.status,
+    })
+    response.set_cookie(
+        key="session_id",
+        value=session_id,
+        max_age=3600 * 24 * 7,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+    return response
 
 # ================== Admin Login ==================
 @router.post("/login")
@@ -74,22 +96,38 @@ def login_user(login_data: schemas.UserLogin, db: Session = Depends(get_db), req
     # Check if user account is active
     if (user.status or "").lower() != "active":
         raise HTTPException(status_code=403, detail="Account is inactive")
-    request.session["user_id"] = user.id
-    return {
+    
+    session_id = create_user_session(db, user.id, request)
+    response = JSONResponse({
         "message": "Sign in successful",
         "user_id": user.id,
-        "role": user.role
-    }
+        "role": user.role,
+    })
+    response.set_cookie(
+        key="session_id",
+        value=session_id,
+        max_age=3600 * 24 * 7,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+    return response
+
+@router.post("/logout")
+def admin_logout(request: Request, db: Session = Depends(get_db)):
+    revoke_session_by_cookie(db, request)
+    response = JSONResponse({"message": "Signed out successfully"})
+    response.delete_cookie("session_id", path="/", samesite="lax", secure=False, httponly=True)
+    return response
 
 
 # ================== Admin Check ==================
 def admin_required(request: Request, db: Session = Depends(get_db)):
 
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
-    user = db.query(models.User).get(user_id)
     if not user:
         raise HTTPException(status=403, detail="Admin privileges required")
     if (user.status or "").lower() != "active":
@@ -98,11 +136,9 @@ def admin_required(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status=403, detail="Admin privileges required")
 
 def super_admin_required(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
-    user = db.query(models.User).get(user_id)
     if not user:
         raise HTTPException(status_code=403, detail="Admin privileges required")
     if (user.status or "").lower() != "active":
@@ -113,11 +149,9 @@ def super_admin_required(request: Request, db: Session = Depends(get_db)):
 @router.get("/checkAdminSession")
 def get_session(request: Request, db: Session = Depends(get_db)):
 
-    user_id = request.session.get("user_id")
-    if user_id:
-        user = db.query(models.User).get(user_id)
-        if user:
-            return {"logged_in": True, "user_id": user.id, "username": user.username, "role": user.role}
+    user = get_user_from_session_cookie(db, request)
+    if user:
+        return {"logged_in": True, "user_id": user.id, "username": user.username, "role": user.role}
     return {"logged_in": False}
 
 

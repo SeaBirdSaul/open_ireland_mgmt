@@ -415,7 +415,7 @@ function ClientV2Inner() {
           // Use setTimeout to ensure state is updated
           setTimeout(() => {
             const authState = useAuthStore.getState();
-            if (authState.role) {
+            if (authState.role === "admin" || authState.role === "super admin") {
               toast.info('You\'re an admin. Use the Admin button in the header to open the admin panel.');
             }
           }, 100);
@@ -664,7 +664,6 @@ function ClientV2Inner() {
       const data = await res.json().catch(() => ({}));
       toast.success(data?.message || 'Signed out successfully.');
       clearAuth();
-      await safeRefreshAuth();
       navigate('/client', { replace: true });
     } catch (err) {
       toast.error(err.message || 'Unable to sign out.');

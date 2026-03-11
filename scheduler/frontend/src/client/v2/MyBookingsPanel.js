@@ -73,7 +73,7 @@ const STATUS_META = {
   EXPIRED: { label: 'Expired', icon: '⚪', bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-600 dark:text-gray-400' },
 };
 
-const ACTIVE_STATUSES = new Set(['APPROVED', 'PENDING']);
+const ACTIVE_STATUSES = new Set(['APPROVED', 'PENDING', 'CONFLICTING']);
 
 const shortId = (id) => id.slice(0, 8).toUpperCase();
 

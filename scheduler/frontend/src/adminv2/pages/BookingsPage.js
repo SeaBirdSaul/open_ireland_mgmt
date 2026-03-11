@@ -139,6 +139,9 @@ export default function BookingsPage() {
     return Array.from(byGroup.entries()).map(([grouped_booking_id, items]) => {
       const sorted = [...items].sort((a,b) => new Date(a.start_time) - new Date(b.start_time));
       const statuses = [...new Set(sorted.map((x) => x.status))];
+      const collaborators = [...new Set(
+        sorted.flatMap((x) => Array.isArray(x.collaborators) ? x.collaborators : [])
+      )];
       return{
         grouped_booking_id,
         count: sorted.length,
@@ -150,6 +153,9 @@ export default function BookingsPage() {
         owner: sorted[0]?.user,
         deviceTypes: [...new Set(sorted.map((x) => x.device?.type).filter(Boolean))],
         raw: sorted,
+        collaborators,
+        hasCollaborators: collaborators.length > 0,
+        collaboratorCount: collaborators.length,
       };
     });
   }, [bookingsQuery.data]);
@@ -286,6 +292,17 @@ export default function BookingsPage() {
             </div>
           );
         },
+      },
+      {
+        key: 'collaborators',
+        header: 'Collaborators',
+        render: (row) => (
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            {row.hasCollaborators
+              ? `${row.collaboratorCount} collaborators${row.collaboratorCount === 1 ? '' : 's'}`
+            : 'None'}
+          </div>
+        ),
       },
       {
         key: 'notes',

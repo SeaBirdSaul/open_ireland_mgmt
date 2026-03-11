@@ -187,8 +187,16 @@ export default function BookingDetailDrawer({ groupId, open, onClose }) {
                   <span className="text-gray-600 dark:text-gray-400">User</span>
                   <span className="text-gray-900 dark:text-gray-100">{data.owner?.username || 'Unknown'}</span>
                 </div>
+                <div className="flex items-start justify-between gap-4">
+                  <span className="text-gray-600 dark:text-gray-400">Collaborators</span>
+                  <span className="text-right text-gray-900 dark:text-gray-100">
+                    {(data.summary?.collaborators || []).length
+                      ? data.summary.collaborators.join(', ')
+                      : 'None'}
+                  </span>
+                </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Device</span>
+                  <span className="text-gray-600 dark:text-gray-400">Time Frame</span>
                   <span className="text-gray-900 dark:text-gray-100">{formatDateTime(data.summary?.group_start)} → {formatDateTime(data.summary?.group_end)}</span>
                 </div>
                 <div className="flex items-center justify-between">

@@ -289,3 +289,20 @@ class EmailVerificationToken(Base):
     __table_args__ = (
         Index("ix_email_verify_user_active", "user_id", "consumed_at", "expires_at"),
     )
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(String(128), primary_key=True,index=True)
+    user_id = Column(Integer, ForeignKey("user_table.id"), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("ix_user_sessions_user_active", "user_id", "revoked_at", "expires_at"),
+    )

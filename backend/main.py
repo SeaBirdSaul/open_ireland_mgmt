@@ -62,6 +62,7 @@ from backend.scheduler.routers.control_panel import router as control_panel_rout
 from backend.core.discord_utils import send_booking_created_notification
 from backend.scheduler.services.auth_tokens import generate_reset_token, hash_token, token_ttl_minutes
 from backend.scheduler.services.mailer import send_password_reset_email, send_email_verification_email
+from backend.scheduler.services.sessions import create_user_session, get_user_from_session_cookie, revoke_session_by_cookie
 
 # Import inventory management router
 from backend.inventory.router import router as inventory_router
@@ -154,7 +155,7 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     secret_key="some-secret-key",
-    session_cookie="session_id",
+    session_cookie="legacy_session_id",
     max_age=3600 * 24 * 7,
     same_site="lax",  # Use "lax" for same-site requests (works for same domain, different ports)
     https_only=False,  # Allow cookies over HTTP for development
@@ -273,7 +274,7 @@ def _create_collaborator_copies(
                 status=owner_booking.status,
                 status_updated_at = datetime.now(),
                 comment=owner_booking.comment,
-                collaborators=f"OG Booker {owner_username}",
+                # collaborators=f"OG Booker {owner_username}",
             )
         )
         created += 1
@@ -443,11 +444,9 @@ def health_check():
 '''
 @app.get("/session")
 def get_session(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if user_id:
-        user = db.query(models.User).get(user_id)
-        if user:
-            return {"logged_in": True, "user_id": user.id, "username": user.username}
+    user = get_user_from_session_cookie(db, request)
+    if user:
+        return {"logged_in": True, "user": user.id, "user_id": user.id, "username": user.username}
     return {"logged_in": False}
 
 
@@ -465,17 +464,11 @@ def get_session(request: Request, db: Session = Depends(get_db)):
 '''
 @app.get("/api/auth/me")
 def get_current_user(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return JSONResponse({"authenticated": False}, status_code=401)
-
-    user = db.query(models.User).get(user_id)
+    user = get_user_from_session_cookie(db, request)
     if not user:
-        request.session.clear()
         return JSONResponse({"authenticated": False}, status_code=401)
 
     if (user.status or "").lower() != "active":
-        request.session.clear()
         return JSONResponse({"authenticated": False}, status_code=403)
     return {
         "authenticated": True,
@@ -609,7 +602,7 @@ def email_verify_resend(payload: schemas.EmailVerificationResend, request: Reque
         user_id = user.id,
         token_hash = hash_token(raw_token),
         expires_at = now + timedelta(minutes = _email_verify_ttl_minutes()),
-        request_ip = (request.client.host if request and request.client else None),
+        requested_ip = (request.client.host if request and request.client else None),
         requested_user_agent = (request.headers.get("user-agent") if request else None),
     ))
     db.commit()
@@ -679,8 +672,8 @@ def get_devices(request: Request, db: Session = Depends(get_db)):
     All authenticated users can view devices to make bookings.
     Only admins can manage devices (via /admin/devices).
     """
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     devices = db.query(models.Device).all()
@@ -834,10 +827,19 @@ def login_user(
     db.commit()
 
     # Store the user_id in Session
-    request.session["user_id"] = user.id
-    logger.info(f"User {user.username} (ID: {user.id}) logged in successfully. Session set.")
+    session_id = create_user_session(db, user.id, request)
 
-    return {"message": "Sign in successful", "user_id": user.id}
+    response = JSONResponse({"messsage": "Sign in successful", "user_id": user.id})
+    response.set_cookie(
+        key="session_id",
+        value=session_id,
+        max_age=3600*24*7,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/"
+    )
+    return response
 
 
 # ================ User Logout ================
@@ -853,13 +855,12 @@ def login_user(
     - Clears the session and deletes the session cookie.
 '''
 @app.post("/logout")
-def logout_user(request: Request):
-    request.session.clear()
+def logout_user(request: Request, db: Session = Depends(get_db)):
+    revoke_session_by_cookie(db, request)
 
     # Update secure to true and httponly to false if HTTPS
     response = JSONResponse({"message": "Signed out successfully"})
     response.delete_cookie("session_id", path="/", samesite="lax", secure=False, httponly=True)
-    response.set_cookie("session_id", "", max_age=0, expires=0, path="/", samesite="lax", secure=False, httponly=True)
     return response
 
 def record_logs(
@@ -1172,19 +1173,18 @@ def cancel_booking(
     if payload and payload.user_id is not None:
         acting_user_id = payload.user_id
     elif request is not None:
-        acting_user_id = request.session.get("user_id")
+        acting_user = get_user_from_session_cookie(db, request)
 
-    if acting_user_id is None:
+    if acting_user.id is None:
         raise HTTPException(
             status_code=400, detail="User ID is required to cancel this booking."
         )
 
-    if acting_user_id != owner_booking.user_id:
+    if acting_user.id != owner_booking.user_id:
         raise HTTPException(
             status_code=403, detail="Only the booking owner can cancel this booking."
         )
 
-    acting_user = db.query(models.User).get(acting_user_id)
     actor_role = acting_user.role
     try: 
         related_bookings = (
@@ -3398,11 +3398,11 @@ def create_topology(
     db: Session = Depends(get_db),
 ):
     """Create a new topology"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    if user_id != topology.user_id:
+    if user.id != topology.user_id:
         raise HTTPException(
             status_code=403, detail="Cannot create topology for another user"
         )
@@ -3445,15 +3445,15 @@ def update_topology(
     db: Session = Depends(get_db),
 ):
     """Update an existing topology"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     existing_topology = db.query(models.Topology).get(topology_id)
     if not existing_topology:
         raise HTTPException(status_code=404, detail="Topology not found")
 
-    if existing_topology.user_id != user_id:
+    if existing_topology.user_id != user.id:
         raise HTTPException(
             status_code=403, detail="Cannot update another user's topology"
         )
@@ -3491,15 +3491,15 @@ def get_topology(
     db: Session = Depends(get_db),
 ):
     """Get a specific topology"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     topology = db.query(models.Topology).get(topology_id)
     if not topology:
         raise HTTPException(status_code=404, detail="Topology not found")
 
-    if topology.user_id != user_id:
+    if topology.user_id != user.id:
         raise HTTPException(
             status_code=403, detail="Cannot access another user's topology"
         )
@@ -3536,11 +3536,11 @@ def list_topologies(
     db: Session = Depends(get_db),
 ):
     """List all topologies for a user"""
-    session_user_id = request.session.get("user_id")
-    if not session_user_id:
+    session_user = get_user_from_session_cookie(db, request)
+    if not session_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    if session_user_id != user_id:
+    if session_user.id != user_id:
         raise HTTPException(
             status_code=403, detail="Cannot list another user's topologies"
         )
@@ -3585,8 +3585,8 @@ def check_topology_availability(
     db: Session = Depends(get_db),
 ):
     """Check availability for all devices in a topology (mocked for now)"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     # Mock availability check - randomly assign availability status
@@ -3638,8 +3638,8 @@ def resolve_topology(
     db: Session = Depends(get_db),
 ):
     """Resolve logical topology to physical device mappings using real topology resolver"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
@@ -3762,8 +3762,8 @@ def suggest_topology_configurations(
     db: Session = Depends(get_db),
 ):
     """Suggest optimized topology configurations with recommendations"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
@@ -3897,8 +3897,8 @@ def forecast_availability(
     db: Session = Depends(get_db),
 ):
     """Forecast availability probabilities for devices"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
@@ -3956,15 +3956,15 @@ def delete_topology(
     db: Session = Depends(get_db),
 ):
     """Delete a topology"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     topology = db.query(models.Topology).get(topology_id)
     if not topology:
         raise HTTPException(status_code=404, detail="Topology not found")
 
-    if topology.user_id != user_id:
+    if topology.user_id != user.id:
         raise HTTPException(
             status_code=403, detail="Cannot delete another user's topology"
         )

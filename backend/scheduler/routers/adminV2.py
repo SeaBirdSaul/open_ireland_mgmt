@@ -17,6 +17,8 @@ from backend.scheduler import models
 from backend.scheduler.routers.admin import admin_required, super_admin_required
 from backend.core.hash import hash_password
 from backend.scheduler.services.invitations import accept_invitation_record, serialize_invitation
+from backend.scheduler.services.sessions import get_user_from_session_cookie
+
 
 router = APIRouter(prefix="/admin/v2", tags=["admin_v2"])
 
@@ -26,8 +28,7 @@ router = APIRouter(prefix="/admin/v2", tags=["admin_v2"])
 @router.get("/session")
 def get_session(request: Request, db: Session = Depends(get_db)):
     admin_required(request, db)
-    user_id = request.session.get("user_id")
-    user = db.query(models.User).get(user_id)
+    user = get_user_from_session_cookie(db, request)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -167,6 +168,9 @@ def list_bookings(
                     "name": b.device.deviceName if b.device else "Unknown",
                     "type": b.device.deviceType if b.device else "Unknown",
                 },
+                "collaborators": b.collaborators or [],
+                "has_collaborators": bool(b.collaborators),
+                "is_collaborator": bool(b.is_collaborator),
             }
             for b in items
         ],
@@ -390,7 +394,10 @@ def list_users(request: Request, db: Session = Depends(get_db), role: str | None
 def invite_user( payload: schemas.AdminUserInviteRequest, request: Request, db: Session = Depends(get_db)):
     
     admin_required(request, db)
-    inviter_id = request.session.get("user_id")
+    current_user = get_user_from_session_cookie(db, request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    inviter_id = current_user.id
 
     normalized_email = (payload.email or "").strip().lower() or None
 
@@ -563,7 +570,13 @@ def get_booking_group_details(group_id: str, request: Request, db: Session = Dep
             item["last_end_time"] = max(item["last_end_time"], b.end_time)
             item["statuses"].add(b.status)
             item["booking_count"] += 1
-
+    
+    owner_rows = [b for b in rows if not b.is_collaborator]
+    collaborators = sorted({
+        name
+        for b in owner_rows
+        for name in (b.collaborators or [])
+    })
     devices = []
     for v in device_map.values():
         devices.append({
@@ -588,6 +601,9 @@ def get_booking_group_details(group_id: str, request: Request, db: Session = Dep
             "group_start": min(b.start_time for b in rows).isoformat(),
             "group_end": max(b.end_time for b in rows).isoformat(),
             "comments": comments,
+            "collaborators": collaborators,
+            "has_collaborators": bool(collaborators),
+            "collaborator_count": len(collaborators),
         },
         "devices": devices,
         "bookings": [
@@ -602,6 +618,8 @@ def get_booking_group_details(group_id: str, request: Request, db: Session = Dep
                     "name": b.device.deviceName if b.device else "Unknown",
                     "type": b.device.deviceType if b.device else "Unknown",
                 },
+                "collaborators": b.collaborators or [],
+                "is_collaborator": bool(b.is_collaborator),
             }
             for b in rows
         ],
@@ -611,8 +629,10 @@ def get_booking_group_details(group_id: str, request: Request, db: Session = Dep
 def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
     super_admin_required(request, db)
 
-    acting_user_id = request.session.get("user_id")
-    if acting_user_id == user_id:
+    current_user = get_user_from_session_cookie(db, request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if current_user.id == user_id:
         raise HTTPException(status_code=400, detail="You cannot delete your own account.")
 
     user = db.query(models.User).get(user_id)
@@ -624,13 +644,19 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
     db.query(models.BookingFavorite).filter(models.BookingFavorite.user_id == user_id).delete(synchronize_session=False)
     db.query(models.Topology).filter(models.Topology.user_id == user_id).delete(synchronize_session=False)
     db.query(models.AdminRole).filter(models.AdminRole.user_id == user_id).delete(synchronize_session=False)
-    db.query(models.AdminAuditLog).filter(models.AdminAuditLog.actor_id == user_id).delete(synchronize_session=False)
     db.query(models.DeviceOwnership).filter(
         (models.DeviceOwnership.owner_id == user_id) | (models.DeviceOwnership.assigned_by == user_id)
     ).delete(synchronize_session=False)
-    db.query(models.AdminInvitation).filter(models.AdminInvitation.invited_by == user_id).delete(synchronize_session=False)
     db.query(models.PasswordResetToken).filter(models.PasswordResetToken.user_id == user_id).delete(synchronize_session=False)
     db.query(models.EmailVerificationToken).filter(models.EmailVerificationToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.UserSession).filter(models.UserSession.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.AdminInvitation).filter(models.AdminInvitation.invited_by == user_id).delete(synchronize_session=False)
+
+    # Preserve records, but remove FK link to deleted user
+    db.query(models.AdminAuditLog).filter(modles.AdminAuditLog.actor_id == user_id).update({models.AdminAuditLog.resolved_by: None}, synchronize_session=False)
+    db.query(models.TopologyReview).filter(models.TopologyReview.resolved_by == user_id).update({models.TopologyReview.resolved_by: None}, synchronize_session=False)
+    db.query(models.AdminSetting).filter(models,AdminSetting.updated_by == user_id).update({models.AdminSetting.updated_by: None}, synchronize_session=False)
+    
 
     db.delete(user)
     db.commit()

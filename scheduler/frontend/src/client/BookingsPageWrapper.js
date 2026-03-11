@@ -22,7 +22,7 @@ export default function BookingsPageWrapper() {
         if (res.ok) {
           const data = await res.json();
           if (data.logged_in) {
-            setUserId(data.user_id);
+            setUserId(data.user_id ?? data.user ?? null);
             setUserName(data.username);
           }
         }
