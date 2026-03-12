@@ -639,25 +639,171 @@ def delete_user(user_id: int, request: Request, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
+    # Transfers ownership of any collab bookings from the deleted user to a collab user
+    transfer_owned_booking_groups(db, user_id)
+
     # Delete all relevant DB entries to avoid FK errors
-    db.query(models.Booking).filter(models.Booking.user_id == user_id).delete(synchronize_session=False)
-    db.query(models.BookingFavorite).filter(models.BookingFavorite.user_id == user_id).delete(synchronize_session=False)
-    db.query(models.Topology).filter(models.Topology.user_id == user_id).delete(synchronize_session=False)
-    db.query(models.AdminRole).filter(models.AdminRole.user_id == user_id).delete(synchronize_session=False)
-    db.query(models.DeviceOwnership).filter(
-        (models.DeviceOwnership.owner_id == user_id) | (models.DeviceOwnership.assigned_by == user_id)
+    db.query(models.Booking).filter(
+        models.Booking.user_id == user_id
     ).delete(synchronize_session=False)
-    db.query(models.PasswordResetToken).filter(models.PasswordResetToken.user_id == user_id).delete(synchronize_session=False)
-    db.query(models.EmailVerificationToken).filter(models.EmailVerificationToken.user_id == user_id).delete(synchronize_session=False)
-    db.query(models.UserSession).filter(models.UserSession.user_id == user_id).delete(synchronize_session=False)
-    db.query(models.AdminInvitation).filter(models.AdminInvitation.invited_by == user_id).delete(synchronize_session=False)
+
+    db.query(models.BookingFavorite).filter(
+        models.BookingFavorite.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    db.query(models.Topology).filter(
+        models.Topology.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    db.query(models.AdminRole).filter(
+        models.AdminRole.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    db.query(models.DeviceOwnership).filter(
+        (models.DeviceOwnership.owner_id == user_id) | 
+        (models.DeviceOwnership.assigned_by == user_id)
+    ).delete(synchronize_session=False)
+
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    db.query(models.EmailVerificationToken).filter(
+        models.EmailVerificationToken.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    db.query(models.UserSession).filter(
+        models.UserSession.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    db.query(models.AdminInvitation).filter(
+        models.AdminInvitation.invited_by == user_id
+    ).delete(synchronize_session=False)
+
 
     # Preserve records, but remove FK link to deleted user
-    db.query(models.AdminAuditLog).filter(modles.AdminAuditLog.actor_id == user_id).update({models.AdminAuditLog.resolved_by: None}, synchronize_session=False)
-    db.query(models.TopologyReview).filter(models.TopologyReview.resolved_by == user_id).update({models.TopologyReview.resolved_by: None}, synchronize_session=False)
-    db.query(models.AdminSetting).filter(models,AdminSetting.updated_by == user_id).update({models.AdminSetting.updated_by: None}, synchronize_session=False)
+    db.query(models.AdminAuditLog).filter(
+        models.AdminAuditLog.actor_id == user_id
+        ).update(
+            {models.AdminAuditLog.actor_id: None}, 
+            synchronize_session=False
+        )
+
+    db.query(models.TopologyReview).filter(
+        models.TopologyReview.resolved_by == user_id
+        ).update(
+            {models.TopologyReview.resolved_by: None},
+            synchronize_session=False
+        )
+
+    db.query(models.AdminSetting).filter(
+        models.AdminSetting.updated_by == user_id
+        ).update(
+            {models.AdminSetting.updated_by: None}, 
+            synchronize_session=False
+        )
     
 
     db.delete(user)
     db.commit()
     return {"user_id":  user_id, "deleted": True}
+
+
+def choose_new_owner(db, owner_bookings):
+    collaborator_names = []
+    seen = set()
+
+    for bookings in owner_bookings:
+        for name in (bookings.collaborators or []):
+            normalized = name.strip().lower()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            collaborator_names.append(name.strip())
+
+    if not collaborator_names:
+        return None
+    
+    candidates = (
+        db.query(models.User)
+        .filter(models.User.username.in_(collaborator_names))
+        .all()
+    )
+    by_name = {u.username.lower(): u for u in candidates}
+
+    for name in collaborator_names:
+        user = by_name.get(name.lower())
+        if user:
+            return user
+    
+    return None
+
+def transfer_owned_booking_groups(db: Session, deleted_user_id: int) -> None:
+    owned_bookings = (
+        db.query(models.Booking)
+        .filter(
+            models.Booking.user_id == deleted_user_id,
+            models.Booking.is_collaborator.is_(False)
+        )
+        .order_by(
+            models.Booking.grouped_booking_id, 
+            models.Booking.start_time, 
+            models.Booking.booking_id
+        )
+        .all()
+    )
+
+    by_group = {}
+    for booking in owned_bookings:
+        by_group.setdefault(booking.grouped_booking_id, []).append(booking)
+
+    for group_id, group_bookings in by_group.items():
+        new_owner = choose_new_owner(db, group_bookings)
+
+        if not new_owner:
+            db.query(models.Booking).filter(
+                models.Booking.grouped_booking_id == group_id
+            ).delete(synchronize_session=False)
+            continue
+        
+        planned_promotions = []
+
+        for owner_booking in group_bookings:
+            replacement = (
+                db.query(models.Booking)
+                .filter(
+                    models.Booking.grouped_booking_id == owner_booking.grouped_booking_id,
+                    models.Booking.device_id == owner_booking.device_id,
+                    models.Booking.start_time == owner_booking.start_time,
+                    models.Booking.end_time == owner_booking.end_time,
+                    models.Booking.user_id == new_owner.id,
+                    models.Booking.is_collaborator.is_(True),
+                )
+                .first()
+            )
+
+            if not replacement:
+                planned_promotions = None
+                break
+
+            remaining_collaborators = [
+                name
+                for name in (owner_booking.collaborators or [])
+                if name.strip().lower() != new_owner.username.lower()
+            ]
+
+            planned_promotions.append((owner_booking, replacement, remaining_collaborators))
+
+        if planned_promotions is None:
+            db.query(models.Booking).filter(
+                models.Booking.grouped_booking_id == group_id
+            ).delete(synchronize_session=False)
+            continue
+        
+        for owner_booking, replacement, remaining_collaborators in planned_promotions:
+            replacement.is_collaborator = False
+            replacement.collaborators = remaining_collaborators or None
+            replacement.cooment = owner_booking.comment
+            replacement.status = owner_booking.status
+            replacement.status_updated_at = owner_booking.status_updated_at
+            db.delete(owner_booking)

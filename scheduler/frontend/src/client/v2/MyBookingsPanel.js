@@ -419,7 +419,13 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
   };
 
   const openCollaboratorEditor = (group) => {
-    setCollaboratorDraft(group.collaborators || []);
+    setCollaboratorDraft(
+      Array.isArray(group.collaborators)
+      ? group.collaborators
+      : typeof group.collaborators === 'string' && group.collaborators.trim()
+      ? [group.collaborators.trim()]
+      : []
+    );
     setCollaboratorEditor(group);
   };
 
@@ -600,7 +606,13 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
   };
 
   const openDeviceCollaboratorEditor = (device, group) => {
-    setDeviceCollaboratorDraft(group.collaborators || []);
+    setDeviceCollaboratorDraft(
+      Array.isArray(group.collaborators)
+        ? group.collaborators
+        : typeof group.collaborators === 'string' && group.collaborators.trim()
+        ? [group.collaborators.trim()]
+        : []
+    );
     setDeviceCollaboratorEditor({ device, group });
   };
 
@@ -731,6 +743,11 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
             const isOwner = group.is_owner;
             const summary = group.summary || {};
             const existingFavorite = favoriteMap.get(group.grouped_booking_id);
+            const collaborators = Array.isArray(group.collaborators)
+              ? group.collaborators
+              : typeof group.collaborators === 'string' && group.collaborators.trim()
+              ? [group.collaborators.trim()]
+              : [];
             return (
               <div
                 key={group.grouped_booking_id}
@@ -805,9 +822,9 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
                     </div>
                   </div>
 
-                  {group.collaborators && group.collaborators.length > 0 && (
+                  {collaborators.length > 0 && (
                     <div className="flex flex-wrap gap-1">
-                      {group.collaborators.map((collaborator) => (
+                      {collaborators.map((collaborator) => (
                         <span
                           key={collaborator}
                           className="inline-flex items-center rounded-full bg-gray-200 dark:bg-gray-700 px-2 py-0.5 text-[11px] font-semibold text-gray-800 dark:text-gray-100"

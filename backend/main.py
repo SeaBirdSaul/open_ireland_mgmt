@@ -274,7 +274,7 @@ def _create_collaborator_copies(
                 status=owner_booking.status,
                 status_updated_at = datetime.now(),
                 comment=owner_booking.comment,
-                # collaborators=f"OG Booker {owner_username}",
+                collaborators=[owner_username] if owner_username else None,
             )
         )
         created += 1
@@ -989,8 +989,7 @@ async def create_bookings(
                 comment=req.message,
                 status_updated_at = datetime.now(),
                 collaborators=collaborator_usernames
-                if collaborator_usernames
-                else None,
+                if collaborator_usernames else None,
                 grouped_booking_id=grouped_booking_id,
             )
             db.add(new_booking)

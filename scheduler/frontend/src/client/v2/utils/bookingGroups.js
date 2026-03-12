@@ -82,6 +82,18 @@ export function buildGroupSummary(group) {
   };
 }
 
+function normalizeCollaborators(collaborators) {
+  if (Array.isArray(collaborators)) {
+    return collaborators.filter((name) => typeof name === 'string' && name.trim());
+  }
+
+  if (typeof collaborators === 'string') {
+    const trimmed = collaborators.trim();
+    return trimmed ? [trimmed]: [];
+  }
+
+  return [];
+}
 export function mergeGroupedBookingEntries(groups = []) {
   const dedupedMap = new Map();
   const statusPriority = (status) => {
@@ -115,7 +127,7 @@ export function mergeGroupedBookingEntries(groups = []) {
     if (!existing) {
       dedupedMap.set(key, {
         ...group,
-        collaborators: Array.from(new Set(group.collaborators || [])),
+        collaborators: Array.from(new Set(normalizeCollaborators(group.collaborators))),
         devices: normalizeDevices(group.devices),
       });
       return;
@@ -124,7 +136,7 @@ export function mergeGroupedBookingEntries(groups = []) {
     if (!existing.is_owner && group.is_owner) {
       dedupedMap.set(key, {
         ...group,
-        collaborators: Array.from(new Set(group.collaborators || [])),
+        collaborators: Array.from(new Set(normalizeCollaborators(group.collaborators))),
         devices: normalizeDevices(group.devices),
       });
       return;
@@ -135,8 +147,8 @@ export function mergeGroupedBookingEntries(groups = []) {
     const mergedStatus = statusCandidates[0] || 'PENDING';
 
     const collaboratorSet = new Set([
-      ...(existing.collaborators || []),
-      ...(group.collaborators || []),
+      ...normalizeCollaborators(existing.collaborators),
+      ...normalizeCollaborators(group.collaborators),
     ]);
 
     const devicesMap = new Map();
