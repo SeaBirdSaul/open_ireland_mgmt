@@ -15,6 +15,7 @@ import {
 } from './api';
 import AdminLayout from './components/AdminLayout';
 import DashboardPage from './pages/DashboardPage';
+import DeviceDetailPage from './pages/DeviceDetailPage';
 import ApprovalsPage from './pages/ApprovalsPage';
 import BookingsPage from './pages/BookingsPage';
 import DevicesPage from './pages/DevicesPage';
@@ -138,6 +139,7 @@ function AdminAppInner() {
             <Route path="approvals" element={<ApprovalsPage />} />
             <Route path="bookings" element={<BookingsPage />} />
             <Route path="devices" element={<DevicesPage />} />
+            <Route path="devices/:deviceId" element={<DeviceDetailPage />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="topologies" element={<TopologiesPage />} />
             <Route path="logs" element={<LogsPage />} />

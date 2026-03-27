@@ -7,11 +7,12 @@
 import hashlib
 from datetime import datetime, UTC, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, or_
+from pydantic import BaseModel
 import secrets
 
-from backend.scheduler import schemas
+from backend.scheduler import schemas, models
 from backend.core.deps import get_db
 from backend.scheduler import models
 from backend.scheduler.routers.admin import admin_required, super_admin_required
@@ -21,6 +22,10 @@ from backend.scheduler.services.sessions import get_user_from_session_cookie
 
 
 router = APIRouter(prefix="/admin/v2", tags=["admin_v2"])
+
+class DeviceStatusUpdateRequset(BaseModel):
+    device_ids: list[int]
+    status: str
 
 # Gets info from User_table in order to get permissions and other details
 # Note: Role, Status and Permissions are currently hardcoded
@@ -348,6 +353,127 @@ def get_devices(request: Request, db: Session = Depends(get_db), status: str | N
             for d in rows
         ],
         "meta": {"total": len(rows)},
+    }
+
+@router.get("/devices/{device_id}", response_model=schemas.DeviceResponse)
+def get_device_detail(
+    device_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin_required(request, db)
+
+    device = (
+        db.query(models.Device)
+        .filter(models.Device.id == device_id)
+        .first()
+    )
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    return device
+
+@router.put("/devices/{device_id}", response_model=schemas.DeviceResponse)
+def update_device_detail(
+    device_id: int,
+    payload: schemas.DeviceUpdateFull,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    admin_required(request, db)
+
+    device = (
+        db.query(models.Device)
+        .filter(models.Device.id == device_id)
+        .first()
+    )
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    existing_polatis = (
+        db.query(models.Device)
+        .filter(
+            models.Device.id != device_id,
+            models.Device.deviceType == payload.deviceType,
+            models.Device.deviceName == payload.deviceName,
+            models.Device.polatis_name == payload.polatis_name,
+        )
+        .first()
+    )
+    if existing_polatis:
+        raise HTTPException(status_code=400, detail="Polatis name already exists in this device group")
+
+    if payload.ip_address:
+        existing_ip_conflict = (
+            db.query(models.Device)
+            .filter(
+                models.Device.id != device_id,
+                models.Device.ip_address == str(payload.ip_address),
+                or_(
+                    models.DeviceType.name != payload.deviceType,
+                    models.Device.name != payload.deviceName,
+                ),
+            )
+            .first()
+        )
+        if existing_ip_conflict:
+            raise HTTPException(status_code=400, detail="IP address already exists for another device")
+        
+    # if payload.deviceType != device.deviceType:
+    #     next_device_type = (
+    #         db.query(models.DeviceType)
+    #         .filter(models.DeviceType.name == payload.deviceType)
+    #         .first()
+    #     )
+    #     if not next_device_type:
+    #         raise HTTPException(
+    #             status_code=400,
+    #             detail=f"DeviceType '{payload.deviceType}' not found. Please create it via inventory API first."
+    #         )
+        
+    device.deviceType = payload.deviceType
+    device.deviceName = payload.deviceName
+    device.polatis_name = payload.polatis_name
+    device.status = payload.status
+    device.ip_address = str(payload.ip_address) if payload.ip_address else None
+    device.maintenance_start = payload.maintenance_start
+    device.maintenance_end = payload.maintenance_end
+    device.Out_Port = payload.Out_Port
+    device.In_Port = payload.In_Port
+
+    db.commit()
+    db.refresh(device)
+    return device
+
+@router.post("/devices/status")
+def update_device_status(
+    payload: DeviceStatusUpdateRequset,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    admin_required(request, db)
+
+    allowed_statuses = {"Available", "Maintenance", "Offline", "Unavailable"}
+    if payload.status not in allowed_statuses:
+        raise HTTPException(status_code=400, detail="Invalid  device status")
+    
+    rows = (
+        db.query(models.Device)
+        .filter(models.Device.id.in_(payload.device_ids))
+        .all()
+    )
+
+    for device in rows:
+        if payload.status == "Offline":
+            device.status = "Unavailable"
+        else:
+            device.status = payload.status
+    
+    db.commit()
+
+    return {
+        "updated": [device.id for device in rows],
+        "Count": len(rows),
     }
 
 @router.get("/users")

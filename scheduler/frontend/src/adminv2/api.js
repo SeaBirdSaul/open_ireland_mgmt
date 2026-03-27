@@ -128,6 +128,17 @@ export function updateDeviceTags(payload) {
   });
 }
 
+export async function fetchDeviceDetail(deviceId) {
+  return adminRequest(`/admin/v2/devices/${deviceId}`, { method: 'GET' });
+}
+
+export function updateDeviceDetail(deviceId, payload) {
+  return adminRequest(`/admin/v2/devices/${deviceId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchUsers(params = {}) {
   const searchParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
