@@ -167,25 +167,19 @@ export default function TimelinePanel({ userName }) {
           maintenance_end: device.maintenance_end,
         };
       } else {
-        // Add this device's ID to the group
         groupedByTypeAndName[key].ids.push(device.id);
-        
-        // Status logic: If any device is Maintenance, the group shows Maintenance
-        // Otherwise, if any device is Available, the group shows Available
-        // Priority: Maintenance > Available > other statuses
-        if (device.status === 'Maintenance') {
-          groupedByTypeAndName[key].status = 'Maintenance';
-        } else if (device.status === 'Available' && groupedByTypeAndName[key].status !== 'Maintenance') {
-          groupedByTypeAndName[key].status = 'Available';
+
+        if (!groupedByTypeAndName[key].status) {
+          groupedByTypeAndName[key].status = device.status;
         }
-        
-        // Merge maintenance windows if needed (use earliest start, latest end)
-        if (device.maintenance_start && (!groupedByTypeAndName[key].maintenance_start || 
-            device.maintenance_start < groupedByTypeAndName[key].maintenance_start)) {
+
+        if (
+          device.maintenance_start &&
+          device.maintenance_end &&
+          !groupedByTypeAndName[key].maintenance_start &&
+          !groupedByTypeAndName[key].maintenance_end
+        ) {
           groupedByTypeAndName[key].maintenance_start = device.maintenance_start;
-        }
-        if (device.maintenance_end && (!groupedByTypeAndName[key].maintenance_end || 
-            device.maintenance_end > groupedByTypeAndName[key].maintenance_end)) {
           groupedByTypeAndName[key].maintenance_end = device.maintenance_end;
         }
       }

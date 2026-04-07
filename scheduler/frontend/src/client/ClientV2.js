@@ -125,15 +125,35 @@ function ClientV2Inner() {
       const since = new Date(previousLoginAt).getTime();
 
       const updates = groups
-        .filter((g) => g.status_updated_at && new Date(g.status_updated_at).getTime() > since)
+        .filter((g) => {
+          const updatedAt = g.status_updated_at ? new Date(g.status_updated_at).getTime() : 0;
+          const comments = Array.isArray(g.comments) ? g.comments : [];
+          const hasMaintenanceComment = comments.some((comment) => 
+            comment?.toLowerCase().includes('declined due to device maintenance')
+          );
+
+        return updatedAt > since && (g.status || '').toUpperCase() === 'DECLINED' && hasMaintenanceComment;
+        })
         .map((g) => ({
           grouped_booking_id: g.grouped_booking_id,
           status: g.status,
           status_updated_at: g.status_updated_at,
+          comments: g.comments || [],
+          device_count: g.device_count,
         }))
         .sort((a, b) => new Date(b.status_updated_at) - new Date(a.status_updated_at));
 
-      if(updates.length > 0) setStatusUpdates(updates);
+      if(updates.length > 0) {
+        updates.forEach((update) => {
+          toast.warning(
+            update.device_count > 1
+              ? `A booking session was declined due to maintenance affecting ${update.device_count} devices.`
+              : 'A booking was declined due to maintenance.'
+          );
+        });
+
+        setStatusUpdates(updates);
+      }
       sessionStorage.setItem(shownKey, '1');
     })();
   }, [isAuthenticated, userId, previousLoginAt, lastLoginAt]);

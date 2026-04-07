@@ -10,6 +10,24 @@ import searchDevice from '../image/search.png';
 import { API_BASE_URL } from '../config/api';
 
 
+function parseMaintenanceDateRange(maintenanceStart, maintenanceEnd) {
+    if (!maintenanceStart || !maintenanceEnd) {
+        return null;
+    }
+
+    const [, startDateStr] = maintenanceStart.split('/');
+    const [, endDateStr] = maintenanceEnd.split('/');
+
+    if (!startDateStr || !endDateStr) {
+        return null;
+    }
+
+    return {
+        startDateStr,
+        endDateStr,
+    };
+}
+
 /**
  * Adds a given number of days to a date.
  * @param {*} baseDate 
@@ -40,8 +58,11 @@ export function getStartOfWeek(date) {
  * @param {*} date 
  * @returns 
  */
-export function formatDateKey(date) {
-    return date.toISOString().split('T')[0];
+function formatDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const dayOfMonth = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${dayOfMonth}`;
 }
 
 // Formats the date as "Month Year"， March 2025
@@ -246,51 +267,70 @@ export default function ScheduleTable({ calendarValue, globalSelections, setGlob
 
     /* --------------- Fetch devices from the admin endpoint when component mounts or when fetchTrigger changes ---------------*/
     useEffect(() => {
-        setIsLoadingDevices(true);
-        async function fetchDevices() {
-            try {
-                const res = await fetch(`${API_BASE_URL}/admin/devices`, {
-                    method: "GET",
-                    credentials: "include"
-                });
-                if (!res.ok) throw new Error("Failed to fetch devices");
-                const data = await res.json();
-                const grouped = {};
-                data.forEach(dev => {
-                    const type = dev.deviceType;
-                    if (!grouped[type]) {
-                        grouped[type] = { name: type, expanded: true, subDevices: [] };
-                    }
+    let isMounted = true;
 
-                    const existingSub = grouped[type].subDevices.find(s => s.name === dev.deviceName);
-                    if (!existingSub) {
-                        grouped[type].subDevices.push({
-                            name: dev.deviceName,
-                            status: dev.status,
-                            maintenance_start: dev.maintenance_start,
-                            maintenance_end: dev.maintenance_end
-                        });
-                    }
-                });
+    async function fetchDevices() {
+        if (isMounted) {
+            setIsLoadingDevices(true);
+        }
 
-                const sortedDevices = Object.keys(grouped)
-                    .sort((a, b) => a.localeCompare(b))
-                    .map(typeKey => ({
-                        ...grouped[typeKey],
-                        subDevices: grouped[typeKey].subDevices.sort((a, b) =>
-                            naturalSort(a.name, b.name)
-                        ),
-                    }));
+        try {
+            const res = await fetch(`${API_BASE_URL}/admin/devices`, {
+                method: "GET",
+                credentials: "include"
+            });
+            if (!res.ok) throw new Error("Failed to fetch devices");
+
+            const data = await res.json();
+            const grouped = {};
+
+            data.forEach(dev => {
+                const type = dev.deviceType;
+                if (!grouped[type]) {
+                    grouped[type] = { name: type, expanded: true, subDevices: [] };
+                }
+
+                const existingSub = grouped[type].subDevices.find(s => s.name === dev.deviceName);
+                if (!existingSub) {
+                    grouped[type].subDevices.push({
+                        name: dev.deviceName,
+                        status: dev.status,
+                        maintenance_start: dev.maintenance_start,
+                        maintenance_end: dev.maintenance_end
+                    });
+                }
+            });
+
+            const sortedDevices = Object.keys(grouped)
+                .sort((a, b) => a.localeCompare(b))
+                .map(typeKey => ({
+                    ...grouped[typeKey],
+                    subDevices: grouped[typeKey].subDevices.sort((a, b) =>
+                        naturalSort(a.name, b.name)
+                    ),
+                }));
+
+            if (isMounted) {
                 setDevices(sortedDevices);
                 setFilteredDevices(sortedDevices);
-            } catch (err) {
-                console.error(err);
-            } finally {
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            if (isMounted) {
                 setIsLoadingDevices(false);
             }
         }
-        fetchDevices();
-    }, [fetchTrigger]);
+    }
+
+    fetchDevices();
+    const intervalId = setInterval(fetchDevices, 30000);
+
+    return () => {
+        isMounted = false;
+        clearInterval(intervalId);
+    };
+}, [fetchTrigger]);
 
     /* --------------- The logic for searching and showing devices ---------------*/
 
@@ -590,17 +630,15 @@ export default function ScheduleTable({ calendarValue, globalSelections, setGlob
             ?.subDevices.find(s => s.name === subName);
 
         // If the device is in maintenance and has maintenance time data, only the slots in the maintenance time period are disabled.
-        if (device && device.status === 'Maintenance' && device.maintenance_start && device.maintenance_end) {
-            const maintenanceStart = parseMaintenanceTime(device.maintenance_start);
-            const maintenanceEnd = parseMaintenanceTime(device.maintenance_end, true);
-            const [startH, endH] = parseTimeSegment(TIME_SEGMENTS[segIndex]);
-            const slotStart = new Date(day);
-            slotStart.setHours(startH, 0, 0, 0);
-            const slotEnd = new Date(day);
-            slotEnd.setHours(endH, 0, 0, 0);
-            // If the current slot overlaps the maintenance time interval, false is returned (not selectable)
-            if (maintenanceStart && maintenanceEnd && slotStart < maintenanceEnd && slotEnd > maintenanceStart) {
-                return false;
+        if (device && device.maintenance_start && device.maintenance_end) {
+            const range = parseMaintenanceDateRange(device.maintenance_start, device.maintenance_end);
+
+            if (range) {
+                const currentDateKey = formatDateKey(day);
+
+                if (currentDateKey >= range.startDateStr && currentDateKey <= range.endDateStr) {
+                    return false;
+                }
             }
         }
 
@@ -831,12 +869,10 @@ export default function ScheduleTable({ calendarValue, globalSelections, setGlob
      */
 
     function getSlotSatusClass(day, segIndex, deviceName, subName) {
-
-
-        if (!userId) return "";
         const [startH, endH] = parseTimeSegment(TIME_SEGMENTS[segIndex]);
         const slotStart = new Date(day);
         slotStart.setHours(startH, 0, 0, 0);
+
         const slotEnd = new Date(day);
         if (endH < startH) {
             slotEnd.setDate(slotEnd.getDate() + 1);
@@ -844,54 +880,26 @@ export default function ScheduleTable({ calendarValue, globalSelections, setGlob
         slotEnd.setHours(endH, 0, 0, 0);
 
         const label = TIME_SEGMENTS[segIndex];
-        if (!isSegmentInFuture(day, label)) {
-            return "";
-        }
 
         // Show the maintenance status slots
         const device = devices.find(d => d.name === deviceName)?.subDevices.find(s => s.name === subName);
 
-        // if the maintenanced slots include 6om-7am， then color it.
-        if (device?.status === 'Maintenance') {
-            // Scenario 1: All day
-            if (device.maintenance_start?.startsWith("All Day")) {
-                // Parse the maintenance date range
-                const [__, startDateStr] = device.maintenance_start.split('/');
-                const [_, endDateStr] = device.maintenance_end.split('/');
+        if (device?.maintenance_start && device?.maintenance_end) {
+            const range = parseMaintenanceDateRange(device.maintenance_start, device.maintenance_end);
+
+            if (range) {
                 const currentDateKey = formatDateKey(day);
 
-                // Determine whether the current date is within the maintenance range
-                if (currentDateKey >= startDateStr && currentDateKey <= endDateStr) {
+                if (currentDateKey >= range.startDateStr && currentDateKey <= range.endDateStr) {
                     return " maintenance-slot";
                 }
             }
-            // Scenario 2: Maintenance window 
-            else if (device.maintenance_start && device.maintenance_end) {
+        }
 
-                const maintenanceStart = parseMaintenanceTime(device.maintenance_start);
-                const maintenanceEnd = parseMaintenanceTime(device.maintenance_end, true);
+        if (!userId) return "";
 
-                // Handle the mapping from 6PM-11PM to 6PM-7AM
-                if (device.maintenance_start.includes("6 PM - 11 PM") && segIndex === 2) {
-                    // Corresponding time period on the user side: 6PM-7AM(+1 Day)
-                    const mappedSlotStart = new Date(day);
-                    mappedSlotStart.setHours(18, 0, 0, 0);
-                    const mappedSlotEnd = new Date(day);
-                    mappedSlotEnd.setDate(mappedSlotEnd.getDate() + 1);
-                    mappedSlotEnd.setHours(7, 0, 0, 0);
-
-                    // Check if time slots is overlapped 
-                    if (maintenanceStart < mappedSlotEnd && maintenanceEnd > mappedSlotStart) {
-                        return " maintenance-slot";
-                    }
-                }
-                // Normal time slot check 
-                else if (maintenanceStart && maintenanceEnd) {
-                    if (slotStart < maintenanceEnd && slotEnd > maintenanceStart) {
-                        return " maintenance-slot";
-                    }
-                }
-            }
+        if (!isSegmentInFuture(day, label)) {
+            return "";
         }
 
         // Get the overlapping bookings
@@ -927,20 +935,18 @@ export default function ScheduleTable({ calendarValue, globalSelections, setGlob
             } else {
                 return " conflicting-slot";
             }
-        } else {
-            // There is only 1 booking
-            const onlyBooking = overlappingBookings[0];
-            if (onlyBooking.user_id === userId) {
-                switch ((onlyBooking.status || "").toLowerCase()) {
-                    case "pending": return " my-pending-slot";
-                    case "confirmed": return " my-confirmed-slot";
-                    case "expired": return " my-expired-slot";
-                    default: return " my-selected-slot";
-                }
-            } else {
-                return " others-slot";
+        }
+        // There is only 1 booking
+        const onlyBooking = overlappingBookings[0];
+        if (onlyBooking.user_id === userId) {
+            switch ((onlyBooking.status || "").toLowerCase()) {
+                case "pending": return " my-pending-slot";
+                case "confirmed": return " my-confirmed-slot";
+                case "expired": return " my-expired-slot";
+                default: return " my-selected-slot";
             }
         }
+        return " others-slot";
     }
 
 
@@ -1117,29 +1123,38 @@ export default function ScheduleTable({ calendarValue, globalSelections, setGlob
                                                         // Get the user name for this time slost
                                                         const slotBookings = getBookingsForSlot(day, segIndex, device.name, subDevice.name);
                                                         const names = slotBookings.map(bk => bk.username);
+                                                        
+                                                        const isMaintenanceSlot = slotClass.includes('maintenance-slot');
 
                                                         return (
                                                             <div
                                                                 key={`${day.toISOString()}-${segIndex}`}
                                                                 className={slotClass + (names.length ? ' booked-slot' : '')}
-                                                                onClick={(e) =>
-                                                                    handleSlotLeftClick(
-                                                                        e,
-                                                                        device.name,
-                                                                        subDevice.name,
-                                                                        day,
-                                                                        segIndex,
-                                                                        label
-                                                                    )
+                                                                title={isMaintenanceSlot ? 'Unavilable: device is in maintenance' : undefined}
+                                                                onClick={
+                                                                    isMaintenanceSlot
+                                                                        ? undefined
+                                                                        : (e) =>
+                                                                            handleSlotLeftClick(
+                                                                                e,
+                                                                                device.name,
+                                                                                subDevice.name,
+                                                                                day,
+                                                                                segIndex,
+                                                                                label
+                                                                            )
                                                                 }
-                                                                onContextMenu={(e) =>
-                                                                    handleSlotRightClick(
-                                                                        e,
-                                                                        device.name,
-                                                                        subDevice.name,
-                                                                        day,
-                                                                        segIndex
-                                                                    )
+                                                                onContextMenu={
+                                                                    isMaintenanceSlot
+                                                                        ? undefined
+                                                                        : (e) =>
+                                                                            handleSlotRightClick(
+                                                                                e,
+                                                                                device.name,
+                                                                                subDevice.name,
+                                                                                day,
+                                                                                segIndex
+                                                                            )
                                                                 }
                                                                 // MouseOver handler disabled to eliminate flicker
                                                                 // Users select by clicking instead of hover preview
@@ -1151,7 +1166,6 @@ export default function ScheduleTable({ calendarValue, globalSelections, setGlob
                                                                 //         segIndex
                                                                 //     )
                                                                 // }
-                                                                title={`${subDevice.name} : ${label}`}
                                                             >
                                                                 {names.length ? names.join(' & ') : label}
                                                             </div>

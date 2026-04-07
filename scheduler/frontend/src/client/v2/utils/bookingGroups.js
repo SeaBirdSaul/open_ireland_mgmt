@@ -3,21 +3,25 @@
  * and merging grouped booking entries for the Lab Scheduler application.
  * Provides functions to format date ranges and build gallery entries.
  */
+
+import { parseLocalDate, formatLocalDateKey } from './localDate';
+
+
 export function groupDatesIntoRanges(dates = []) {
-  const sorted = [...new Set(dates)].sort((a, b) => new Date(a) - new Date(b));
+  const sorted = [...new Set(dates)].sort((a, b) => parseLocalDate(a) - parseLocalDate(b));
   if (sorted.length === 0) {
     return [];
   }
 
   const ranges = [];
   let rangeStart = sorted[0];
-  let prevDate = new Date(sorted[0]);
+  let prevDate = parseLocalDate(sorted[0]);
 
   for (let i = 1; i < sorted.length; i++) {
-    const currentDate = new Date(sorted[i]);
+    const currentDate = parseLocalDate(sorted[i]);
     const diffDays = Math.round((currentDate - prevDate) / (1000 * 60 * 60 * 24));
     if (diffDays > 1) {
-      ranges.push({ start: rangeStart, end: prevDate.toISOString().split('T')[0] });
+      ranges.push({ start: rangeStart, end: formatLocalDateKey(prevDate) });
       rangeStart = sorted[i];
     }
     prevDate = currentDate;
@@ -41,8 +45,8 @@ export function summarizeDevices(devices = []) {
 }
 
 export function formatDateRangeLabel(start, end) {
-  const startDate = new Date(start);
-  const endDate = new Date(end);
+  const startDate = parseLocalDate(start);
+  const endDate = parseLocalDate(end);
   const sameDay = startDate.toDateString() === endDate.toDateString();
   if (sameDay) {
     return startDate.toLocaleDateString('en-US', {

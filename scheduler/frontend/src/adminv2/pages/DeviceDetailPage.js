@@ -143,9 +143,11 @@ export default function DeviceDetailPage() {
         polatis_name: '',
         ip_address: '',
         status: 'Available',
+        maintenance_mode: 'single',
+        maintenance_date: '',
         maintenance_start_date: '',
-        maintenance_start_period: '',
-        expected_duration_hours: '',
+        maintenance_end_date: '',
+        maintenance_period: '',
         Out_Port: '',
         In_Port: '',
     });
@@ -164,9 +166,11 @@ export default function DeviceDetailPage() {
             polatis_name: deviceQuery.data.polatis_name || '',
             ip_address: deviceQuery.data.ip_address || '',
             status: deviceQuery.data.status || 'Available',
+            maintenance_mode: isMultiDayMaintenance ? 'multi' : 'single',
+            maintenance_date: !isMultiDayMaintenance ? parsedMaintenanceStart.date || '' : '',
             maintenance_start_date: parsedMaintenanceStart.date || '',
-            maintenance_start_period: parsedMaintenanceStart.period || '',
-            expected_duration_hours: '',
+            maintenance_end_date: parsedMaintenanceEnd.date || '',
+            maintenance_period: parsedMaintenanceStart.period || '',
             Out_Port: deviceQuery.data.Out_Port || '',
             In_Port: deviceQuery.data.In_Port || '',
         });
@@ -174,10 +178,18 @@ export default function DeviceDetailPage() {
 
     const updateMutation = useMutation({
         mutationFn: (payload) => updateDeviceDetail(deviceId, payload),
-        onSuccess: async () => {
-            toast.success('Device updated.');
+        onSuccess: async (result) => {
+            const affectedCount = result?.maintenance?.affected_count ?? 0;
+
+            if (affectedCount > 0) {
+                toast.success(`Device updated. ${affectedCount} bookings were affected by maintenance.`);
+            } else {
+                toast.success('Device updated.');
+            }
+            
             await queryClient.invalidateQueries({ queryKey: ['admin-device', deviceId] });
             await queryClient.invalidateQueries({ queryKey: ['admin-devices'] });
+            await queryClient.invalidateQueries({ queryKey: ['admin-bookings'] });
             setIsEditing(false);
         },
         onError: (err) => {
@@ -231,17 +243,33 @@ export default function DeviceDetailPage() {
 
     const device = deviceQuery.data;
     const parsedMaintenanceStart = parseMaintenanceValue(deviceQuery.data.maintenance_start);
+    const parsedMaintenanceEnd = parseMaintenanceValue(deviceQuery.data.maintenance_end);
+    
+    const isMultiDayMaintenance =
+        parsedMaintenanceStart.date &&
+        parsedMaintenanceEnd.date &&
+        parsedMaintenanceStart.date !== parsedMaintenanceEnd.date;
 
-    const computedMaintenanceStart = formatMaintenanceValue(
-        form.maintenance_start_period,
-        form.maintenance_start_date
-    );
+    function buildMaintenanceWindow({ mode, date, startDate, endDate, period }) {
+        if (!period) return { start: null, end: null};
 
-    const computedMaintenanceEnd = computeMaintenanceEnd(
-        form.maintenance_start_date,
-        form.maintenance_start_period,
-        form.expected_duration_hours
-    );
+        if(mode === 'single') {
+            if (!date) return { start: null, end: null };
+            return {
+                start: `${period}/${date}`,
+                end: `${period}/${date}`
+            };
+        }
+
+        if (!startDate || !endDate) {
+            return { start: null, end: null };
+        }
+
+        return {
+            start: `${period}/${startDate}`,
+            end: `${period}/${endDate}`
+        };
+    }
 
     if (!device) {
         return (
@@ -317,35 +345,47 @@ export default function DeviceDetailPage() {
                         onSubmit={(e) => {
                             e.preventDefault();
 
+                            const maintenanceWindow = buildMaintenanceWindow({
+                                mode: form.maintenance_mode,
+                                date: form.maintenance_date,
+                                startDate: form.maintenance_start_date,
+                                endDate: form.maintenance_end_date,
+                                period: form.maintenance_period
+                            });
+
                             if (form.status === 'Maintenance') {
-                                if (!form.maintenance_start_date || !form.maintenance_start_period) {
-                                    toast.error('Maintenance requires a start date and start period.');
+                                if (!form.maintenance_period) {
+                                    toast.error('Maintenance requires a time slot.');
                                     return;
                                 }
 
-                                if (!computedMaintenanceStart || !computedMaintenanceEnd) {
-                                    toast.error(`Invalid maintenance values. start=${computedMaintenanceStart ?? 'null'} end$=computedMaintenanceEnd ?? 'null'}`);
+                                if (form.maintenance_mode === 'single' && !form.maintenance_date) {
+                                    toast.error('Single-day maintenance requires a date.');
+                                    return;
+                                }
+
+                                if (form.maintenance_mode === 'multi' && (!form.maintenance_start_date || !form.maintenance_end_date)) {
+                                    toast.error('Invalid maintenance window.');
+                                    return;
+                                }
+
+                                if (form.maintenance_mode === 'multi' && form.maintenance_end_date < form.maintenance_start_date) {
+                                    toast.error('Maintenance end date must be on or after the start date.');
                                     return;
                                 }
                             }
-
-                            const today = new Date().toISOString().slice(0, 10);
-
-                            const shouldActivateMaintenanceNow = 
-                                form.status === 'Maintenance' &&
-                                form.maintenance_start_date === today;
 
                             const payload = {
                                 deviceType: form.deviceType,
                                 deviceName: form.deviceName,
                                 polatis_name: form.polatis_name?.trim() ? form.polatis_name.trim() : null,
                                 ip_address: form.ip_address?.trim() ? form.ip_address.trim() : null,
-                                status: shouldActivateMaintenanceNow ? 'Maintenance' : form.status === 'Maintenanace' ? 'Available' : form.status,
-                                maintenance_start: form.status === 'Maintenance' ? computedMaintenanceStart : null,
-                                maintenance_end: form.status === 'Maintenance' ? computedMaintenanceEnd : null,
+                                status: form.status,
+                                maintenance_start: form.status === 'Maintenance' ? maintenanceWindow.start : null,
+                                maintenance_end: form.status === 'Maintenance' ? maintenanceWindow.end : null,
                                 Out_Port: Number(form.Out_Port),
                                 In_Port: Number(form.In_Port),
-                            }
+                            };
                             updateMutation.mutate(payload);
                         }}
                     >
@@ -433,40 +473,40 @@ export default function DeviceDetailPage() {
 
                         {form.status === 'Maintenance' && (
                             <>
-                                <div>
-                                    <label className="block text-sm font-medium mb-1">Maintenance Start Date</label>
-                                    <input
-                                        type="date"
-                                        value={form.maintenance_start_date}
-                                        onChange={(e) => setForm((prev) => ({ ...prev, maintenance_start_date: e.target.value }))}
-                                        className="w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-900"
-                                    />
+                                <div className="md:col-span-2 rounded-md border border-gray-200 dark:border-gray-800 px-4 py-3">
+                                    <div className="flex items-center justify-between gap-4">
+                                        <div>
+                                            <div className="text-sm font-medium">Maintenance span</div>
+                                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                Choose single-day maintenance or switch to multi-day maintenance.
+                                            </div>
+                                        </div>
+                                        <label className="inline-flex items-center gap-2 text-sm">
+                                            <input 
+                                                type="checkbox"
+                                                checked={form.maintenance_mode === 'multi'}
+                                                onChange={(e) =>
+                                                    setForm((prev) => ({
+                                                        ...prev,
+                                                        maintenance_mode: e.target.checked? 'multi' : 'single',
+                                                    }))
+                                                }
+                                            />
+                                            Multi-day maintenance
+                                        </label>
+                                    </div>
                                 </div>
 
-                                {/* <div>
-                                    <label className="block text-sm font-medium mb-1">Expected Time Taken (Hours)</label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        step="1"
-                                        value={form.expected_duration_hours}
-                                        onChange={(e) =>
-                                        setForm((prev) => ({ ...prev, expected_duration_hours: e.target.value }))
-                                        }
-                                        className="w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-900"
-                                    />
-                                </div> */}
-
                                 <div>
-                                    <label className="block text-sm font-medium mb-1">Maintenance Start Period</label>
+                                    <label className="block text-sm font-medium mb-1">Maintenance Time Slot</label>
                                     <select
-                                        value={form.maintenance_start_period}
+                                        value={form.maintenance_period}
                                         onChange={(e) =>
-                                        setForm((prev) => ({ ...prev, maintenance_start_period: e.target.value }))
+                                            setForm((prev) => ({ ...prev, maintenance_period: e.target.value }))
                                         }
                                         className="w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-900"
                                     >
-                                        <option value="">Select period</option>
+                                        <option value="">Select slot</option>
                                         <option value="7 AM - 12 PM">7 AM - 12 PM</option>
                                         <option value="12 PM - 6 PM">12 PM - 6 PM</option>
                                         <option value="6 PM - 11 PM">6 PM - 11 PM</option>
@@ -474,9 +514,61 @@ export default function DeviceDetailPage() {
                                     </select>
                                 </div>
 
+                                {form.maintenance_mode === 'single' ? (
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">Maintenance Date</label>
+                                        <input
+                                            type="date"
+                                            value={form.maintenance_date}
+                                            onChange={(e) => 
+                                                setForm((prev) => ({ ...prev, maintenance_date: e.target.value }))
+                                            }
+                                            className="w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-900"
+                                        />
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Maintenance Start Date</label>
+                                            <input
+                                                type="date"
+                                                value={form.maintenance_start_date}
+                                                onChange={(e) => 
+                                                    setForm((prev) => ({ ...prev, maintenance_start_date: e.target.value }))
+                                                }
+                                                className="w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-900"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">Maintenance End Date</label>
+                                            <input
+                                                type="date"
+                                                value={form.maintenance_end_date}
+                                                onChange={(e) => 
+                                                    setForm((prev) => ({ ...prev, maintenance_end_date: e.target.value }))
+                                                }
+                                                className="w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-900"
+                                            />
+                                        </div>
+                                    </>
+                                )}
+
                                 <div className="md:col-span-2 rounded-md bg-gray-50 dark:bg-gray-900 px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
-                                    <div>Maintenance start: {formatMaintenanceDisplay(computedMaintenanceStart, 'start')}</div>
-                                    <div className="mt-1">Computed maintenance end: {formatMaintenanceDisplay(computedMaintenanceEnd, 'end')}</div>
+                                    <div>
+                                        Maintenance Start: {form.maintenance_period ? (
+                                            form.maintenance_mode === 'single'
+                                                ? formatMaintenanceDisplay(`${form.maintenance_period}/${form.maintenance_date}`, 'start')
+                                                : formatMaintenanceDisplay(`${form.maintenance_period}/${form.maintenance_start_date}`, 'start')
+                                        ) : '-'}
+                                    </div>
+                                    <div className="mt-1">
+                                        Maintenance end: {form.maintenance_period ? (
+                                            form.maintenance_mode === 'single'
+                                                ? formatMaintenanceDisplay(`${form.maintenance_period}/${form.maintenance_date}`, 'end')
+                                                : formatMaintenanceDisplay(`${form.maintenance_period}/${form.maintenance_end_date}`, 'end')
+                                        ) : '-'}
+                                    </div>
                                 </div>
                             </>
                         )}

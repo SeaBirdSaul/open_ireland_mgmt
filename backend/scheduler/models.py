@@ -58,6 +58,7 @@ class Device(Base):
     status = Column(String(50), nullable=True)
     maintenance_start = Column(String(100), nullable=True)
     maintenance_end = Column(String(100), nullable=True)
+    maintenance_return_status = Column(String(50), nullable=True)
 
     Out_Port = Column(Integer, nullable=False)
     In_Port = Column(Integer, nullable=False)

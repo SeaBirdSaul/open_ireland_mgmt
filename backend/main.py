@@ -31,7 +31,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from backend.core.database import engine, Base
+from backend.core.database import engine, Base, SessionLocal
 from backend.core.hash import hash_password, verify_password
 from backend.core.deps import get_db
 from backend.scheduler.schemas import (
@@ -59,21 +59,42 @@ from backend.scheduler.routers.adminV2 import router as admin_v2_router
 from backend.scheduler.routers.admin_debug import router as admin_debug_router
 from backend.scheduler.routers.control_panel import router as control_panel_router
 # from backend.scheduler.services.invitations import router as invitations_router
-from backend.core.discord_utils import send_booking_created_notification
+from backend.core.discord_utils import send_booking_created_notification, send_admin_action_notification
 from backend.scheduler.services.auth_tokens import generate_reset_token, hash_token, token_ttl_minutes
 from backend.scheduler.services.mailer import send_password_reset_email, send_email_verification_email
 from backend.scheduler.services.sessions import create_user_session, get_user_from_session_cookie, revoke_session_by_cookie
+from backend.scheduler.services.maintenance import sync_scheduled_maintenance_statuses
+
 
 # Import inventory management router
 from backend.inventory.router import router as inventory_router
 from backend.inventory import models as inventory_models  # noqa: F401
 
+from apscheduler.schedulers.background import BackgroundScheduler
 import smtplib
 from email.message import EmailMessage
 
 _TZ = ZoneInfo("Europe/Dublin")
 
 app = FastAPI()
+
+# ========= HELPER =================
+maintenance_scheduler: BackgroundScheduler | None = None
+
+def run_scheduled_maintenance_sync() -> None:
+    db = SessionLocal()
+    try:
+        result = sync_scheduled_maintenance_statuses(db)
+        db.commit()
+    
+        for notification in result.notifications:
+            if notification.discord_id:
+                send_admin_action_notification(notification.message, notification.discord_id)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Scheduled maintenance sync failed: %s", exc)
+    finally:
+        db.close()
 
 # Create all database tables on startup (scheduler models + inventory models)
 # NOTE: This is a breaking change for inventory schema:
@@ -104,6 +125,19 @@ async def create_tables():
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully")
+        
+        global maintenance_scheduler
+        if maintenance_scheduler is None:
+            maintenance_scheduler = BackgroundScheduler(timezone="UTC")
+            maintenance_scheduler.add_job(
+                run_scheduled_maintenance_sync,
+                trigger="interval",
+                minutes=15,
+                id="scheduled-maintenance-sync",
+                replace_existing=True
+            )
+            maintenance_scheduler.start()
+
     except Exception as e:
         logger.error(f"Error creating database tables: {e}")
         if fail_fast:
@@ -161,6 +195,12 @@ app.add_middleware(
     https_only=False,  # Allow cookies over HTTP for development
 )
 
+@app.on_event("shutdown")
+async def shutdown_scheduler():
+    global maintenance_scheduler
+    if maintenance_scheduler:
+        maintenance_scheduler.shutdown(wait=False)
+        maintenance_scheduler = None
 
 # Database dependency is now imported from deps.py
 
@@ -2593,6 +2633,7 @@ def get_user_bookings(
                 "end_date": booking.end_time.date(),
                 "created_at": booking.created_at,
                 "statuses": set(),
+                "comments": set(),
                 "status_updated_at": booking.status_updated_at or booking.created_at,
                 "is_owner": is_owner,
                 "is_collaborator": is_collaborator,
@@ -2610,6 +2651,11 @@ def get_user_bookings(
 
         if booking.created_at < group["created_at"]:
             group["created_at"] = booking.created_at
+        
+        if booking.comment:
+            stripped_comment = booking.comment.strip()
+            if stripped_comment:
+                group["comments"].add(stripped_comment)
 
         group["statuses"].add((booking.status or "").upper())
         combined_collabs = set(group["collaborators"] or [])
@@ -2688,6 +2734,7 @@ def get_user_bookings(
                 "created_at": group["created_at"].isoformat(),
                 "status": derive_status(group["statuses"]),
                 "status_updated_at": group["status_updated_at"].isoformat(),
+                "comments": sorted(group["comments"]),
                 "devices": devices,
                 "device_count": len(devices),
                 "booking_ids": sorted(group["booking_ids"]),

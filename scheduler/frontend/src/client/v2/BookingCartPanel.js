@@ -15,6 +15,7 @@ import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import CollaboratorInput from '../../components/CollaboratorInput';
 import { getPanelBackgroundColor } from '../../utils/darkModeUtils';
 import { useDocumentObserver } from '../../hooks/useDocumentObserver';
+import { parseLocalDate } from './utils/localDate';
 
 export default function BookingCartPanel({ userId, userName }) {
   const selectedSlots = useBookingState((state) => state.selectedSlots);
@@ -203,14 +204,14 @@ export default function BookingCartPanel({ userId, userName }) {
   }, [hasConflicts, allowConflictSubmission]);
 
   const rangeLabel = hasValidRange
-    ? `${new Date(effectiveRangeStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} – ${new Date(effectiveRangeEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+    ? `${parseLocalDate(effectiveRangeStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} – ${parseLocalDate(effectiveRangeEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
     : 'No date range selected';
 
   // Format date range from sorted dates
   const formatDateRange = (dates) => {
     if (dates.length === 0) return '';
     if (dates.length === 1) {
-      return new Date(dates[0]).toLocaleDateString('en-US', {
+      return parseLocalDate(dates[0]).toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
       });
@@ -223,8 +224,8 @@ export default function BookingCartPanel({ userId, userName }) {
     let end = sorted[0];
 
     for (let i = 1; i < sorted.length; i++) {
-      const current = new Date(sorted[i]);
-      const prev = new Date(sorted[i - 1]);
+      const current = parseLocalDate(sorted[i]);
+      const prev = parseLocalDate(sorted[i - 1]);
       const diffDays = Math.floor((current - prev) / (1000 * 60 * 60 * 24));
 
       if (diffDays === 1) {
@@ -238,8 +239,8 @@ export default function BookingCartPanel({ userId, userName }) {
     ranges.push({ start, end });
 
     return ranges.map(range => {
-      const startDate = new Date(range.start);
-      const endDate = new Date(range.end);
+      const startDate = parseLocalDate(range.start);
+      const endDate = parseLocalDate(range.end);
       if (range.start === range.end) {
         return startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       }

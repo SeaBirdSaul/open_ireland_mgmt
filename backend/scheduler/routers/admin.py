@@ -161,7 +161,7 @@ def get_session(request: Request, db: Session = Depends(get_db)):
 def get_devices(request: Request, db: Session = Depends(get_db)):
     admin_required(request, db)
     # Phase U2: Eager load device_type to prevent N+1 queries
-    return db.query(Device).options(joinedload(Device.device_type)).all()
+    return db.query(models.Device).all()
 
 
 

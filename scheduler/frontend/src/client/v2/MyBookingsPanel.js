@@ -234,6 +234,40 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
     setCurrentPage(1);
   }, [showActiveOnly, filteredGroups.length]);
 
+  useEffect(() => {
+    if (!Array.isArray(filteredGroups) || !toast || !userId) return;
+
+    const storageKey = `maintenance-decline-seen:${userId}`;
+    const seen = JSON.parse(localStorage.getItem(storageKey) || '[]');
+
+    const newlyAffected = filteredGroups.filter((group) => {
+      const hasMaintenancecomment = 
+        Array.isArray(group.comments) && group.comments.some((comment) => 
+          comment?.toLowerCase().includes('declined due to device maintenance')
+        );
+
+      const isDeclined = (group.status || '').toUpperCase() === 'DECLINED';
+      const marker = `${group.grouped_booking_id}:${group.status_updated_at}`;
+
+      return hasMaintenancecomment && isDeclined && !seen.includes(marker);
+    });
+
+    if (newlyAffected.length === 0) return;
+
+    newlyAffected.forEach((group) => {
+      toast.warning(
+        `A booking was declined due to maintenance for ${group.device_count || group.devices?.length || 1} device(s).`
+      );
+    });
+
+    const nextSeen = [
+      ...seen,
+      ...newlyAffected.map((group) => `${group.grouped_booking_id}:${group.status_updated_at}`),
+    ];
+
+    localStorage.setItem(storageKey, JSON.stringify(nextSeen));
+  }, [filteredGroups, toast, userId]);
+
   const toggleExpanded = (groupId) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -748,6 +782,12 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
               : typeof group.collaborators === 'string' && group.collaborators.trim()
               ? [group.collaborators.trim()]
               : [];
+              
+              const comments = Array.isArray(group.comments) ? group.comments.filter(Boolean) : [];
+              const maintenanceComments = comments.filter((comment) =>
+                comment.toLowerCase().includes('declined due to device maintenance')
+              );
+
             return (
               <div
                 key={group.grouped_booking_id}
@@ -779,6 +819,22 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
                       <p className="text-xs text-gray-600 dark:text-gray-400">
                         {summary.deviceSummary} · {group.device_count} device{group.device_count !== 1 ? 's' : ''}
                       </p>
+                      {comments.length > 0 && (
+                        <div className="space-y-1">
+                          {comments.map((comment, index) => (
+                            <div
+                              key={`${group.grouped_booking_id}-comment-${index}`}
+                              className={`rounded-md px-2.5 py-2 text-xs ${
+                                maintenanceComments.includes(comment)
+                                  ? 'border border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
+                                  : 'border border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                              }`}
+                            >
+                              {comment}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                         <span>Owner:</span>
                         <span className="font-medium">@{group.owner_username}</span>

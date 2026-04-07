@@ -6,7 +6,7 @@
 '''
 import hashlib
 from datetime import datetime, UTC, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
 from pydantic import BaseModel
@@ -15,17 +15,50 @@ import secrets
 from backend.scheduler import schemas, models
 from backend.core.deps import get_db
 from backend.scheduler import models
+from backend.inventory import models as inventory_models
 from backend.scheduler.routers.admin import admin_required, super_admin_required
 from backend.core.hash import hash_password
 from backend.scheduler.services.invitations import accept_invitation_record, serialize_invitation
 from backend.scheduler.services.sessions import get_user_from_session_cookie
-
+from backend.core.discord_utils import send_admin_action_notification
+from backend.scheduler.services.maintenance import (
+    apply_maintenance_to_devices, 
+    device_is_entering_maintenance,
+    is_maintenance_window_valid,
+    is_maintenance_active_at,
+    resolve_status_for_scheduled_maintenance
+)
 
 router = APIRouter(prefix="/admin/v2", tags=["admin_v2"])
 
 class DeviceStatusUpdateRequset(BaseModel):
     device_ids: list[int]
     status: str
+    maintenance_start: str | None = None
+    maintenance_end: str | None = None
+
+def sync_inventory_device_status(
+    db: Session,
+    *,
+    device_name: str,
+    device_type: str | None,
+    status: str | None,
+    maintenance_start: str | None,
+    maintenance_end: str | None,
+) -> None:
+    inventory_device = (
+        db.query(inventory_models.InventoryDevice)
+        .filter(inventory_models.InventoryDevice.deviceName == device_name)
+        .filter(inventory_models.InventoryDevice.deviceType == device_type)
+        .first()
+    )
+
+    if not inventory_device:
+        return
+    
+    inventory_device.status = status
+    inventory_device.maintenance_start = maintenance_start
+    inventory_device.maintenance_end = maintenance_end
 
 # Gets info from User_table in order to get permissions and other details
 # Note: Role, Status and Permissions are currently hardcoded
@@ -355,7 +388,7 @@ def get_devices(request: Request, db: Session = Depends(get_db), status: str | N
         "meta": {"total": len(rows)},
     }
 
-@router.get("/devices/{device_id}", response_model=schemas.DeviceResponse)
+@router.get("/devices/{device_id}")
 def get_device_detail(
     device_id: int,
     request: Request,
@@ -373,11 +406,12 @@ def get_device_detail(
     
     return device
 
-@router.put("/devices/{device_id}", response_model=schemas.DeviceResponse)
+@router.put("/devices/{device_id}")
 def update_device_detail(
     device_id: int,
     payload: schemas.DeviceUpdateFull,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     admin_required(request, db)
@@ -389,6 +423,8 @@ def update_device_detail(
     )
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    
+    previous_status = device.status
 
     existing_polatis = (
         db.query(models.Device)
@@ -434,21 +470,73 @@ def update_device_detail(
     device.deviceType = payload.deviceType
     device.deviceName = payload.deviceName
     device.polatis_name = payload.polatis_name
-    device.status = payload.status
+    
     device.ip_address = str(payload.ip_address) if payload.ip_address else None
-    device.maintenance_start = payload.maintenance_start
-    device.maintenance_end = payload.maintenance_end
+    
+    if payload.status == "Maintenance":
+        if not is_maintenance_window_valid(payload.maintenance_start, payload.maintenance_end):
+            raise HTTPException(status_code=400, detail="Valid maintenance start and end are required.")
+
+        if previous_status != "Maintenance":
+            device.maintenance_return_status = previous_status or "Available"
+
+        device.maintenance_start = payload.maintenance_start
+        device.maintenance_end = payload.maintenance_end
+        device.status = resolve_status_for_scheduled_maintenance(
+            requested_status = payload.status,
+            previous_status = previous_status,
+            maintenance_start = payload.maintenance_start,
+            maintenance_end = payload.maintenance_end,
+            fallback_status = getattr(device, "maintenance_return_status", None) or "Available",
+        )    
+    else:
+        device.status = payload.status
+        device.maintenance_start = None
+        device.maintenance_end = None
+        if hasattr(device, "maintenance_return_status"):
+            device.maintenance_return_status = None
+
     device.Out_Port = payload.Out_Port
     device.In_Port = payload.In_Port
 
+    sync_inventory_device_status(
+        db,
+        device_name = device.deviceName,
+        device_type = device.deviceType,
+        status = device.status,
+        maintenance_start = device.maintenance_start,
+        maintenance_end = device.maintenance_end
+    )
+
+    maintenance_result = None
+    if (device_is_entering_maintenance(previous_status, device.status) and is_maintenance_active_at(maintenance_start = device.maintenance_start, maintenance_end = deivce.maintenance_end)):
+        maintenance_result = apply_maintenance_to_devices(db, devices=[device])
+
     db.commit()
     db.refresh(device)
-    return device
+
+    if maintenance_result:
+        for notification in maintenance_result.notifications:
+            if notification.discord_id:
+                background_tasks.add_task(
+                    send_admin_action_notification,
+                    notification.message,
+                    notification.discord_id
+                )
+
+    return {
+        "device": device,
+        "maintenance": {
+            "affected_booking_ids": maintenance_result.affected_booking_ids if maintenance_result else [],
+            "affected_count": maintenance_result.affected_count if maintenance_result else 0
+        }
+    }
 
 @router.post("/devices/status")
 def update_device_status(
     payload: DeviceStatusUpdateRequset,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     admin_required(request, db)
@@ -462,18 +550,78 @@ def update_device_status(
         .filter(models.Device.id.in_(payload.device_ids))
         .all()
     )
+    maintenance_candidates = []
 
     for device in rows:
+        previous_status = device.status
+
         if payload.status == "Offline":
             device.status = "Unavailable"
+            device.maintenance_start = None
+            device.maintenance_end = None
         else:
-            device.status = payload.status
-    
+            if payload.status == "Maintenance":
+                if not is_maintenance_window_valid(payload.maintenance_start, payload.maintenance_end):
+                    raise HTTPException(status_code=400, detail="Valid maintenance start and end are required.")
+
+                if previous_status != "Maintenance":
+                    device.maintenance_return_status = previous_status or "Available"
+                
+                device.maintenance_start = payload.maintenance_start
+                device.maintenance_end = payload.maintenance_end
+                device.status = resolve_status_for_scheduled_maintenance(
+                    requested_status = payload.status,
+                    previous_status = previous_status,
+                    maintenance_start = payload.maintenance_start,
+                    maintenance_end = payload.maintenance_end,
+                    fallback_status = getattr(device, "maintenance_return_status", None) or "Available",
+                )
+            else:
+                device.status = payload.status
+                device.maintenance_start = None
+                device.maintenance_end = None
+                if hasattr(device, "maintenance_return_status"):
+                    device.maintenance_return_status = None
+
+                if is_maintenance_active_at(device.maintenance_start, device.maintenance_end):
+                    device.status = "Maintenance"
+                    maintenance_candidates.append(device)
+                    
+        
+        sync_inventory_device_status(
+            db,
+            device_name=device.deviceName,
+            device_type=device.deviceType,
+            status=device.status,
+            maintenance_start=device.maintenance_start,
+            maintenance_end=device.maintenance_end,
+        )
+
+        if device_is_entering_maintenance(previous_status, device.status):
+            maintenance_candidates.append(device)
+
+    maintenance_result = None
+    if maintenance_candidates:
+        maintenance_result = apply_maintenance_to_devices(db, devices=maintenance_candidates)
+
     db.commit()
+    
+    if maintenance_result:
+        for notification in maintenance_result.notifications:
+            if notification.discord_id:
+                background_tasks.add_task(
+                    send_admin_action_notification,
+                    notification.message,
+                    notification.discord_id
+                )    
 
     return {
         "updated": [device.id for device in rows],
         "Count": len(rows),
+        "maintenance": {
+            "affected_booking_ids": maintenance_result.affected_booking_ids if maintenance_result else [],
+            "affected_count": maintenance_result.affected_count if maintenance_result else 0
+        }
     }
 
 @router.get("/users")

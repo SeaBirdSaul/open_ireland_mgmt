@@ -6,6 +6,7 @@ import { findConflicts } from '../../services/bookingServiceV2';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { useDocumentObserver } from '../../hooks/useDocumentObserver';
 import { getPanelBackgroundColor, getBookedCellBackgroundColor, getBookedCellBorderColor } from '../../utils/darkModeUtils';
+import { parseLocalDate, formatLocalDateKey, addDaysLocal } from './utils/localDate';
 
 const DAYS_IN_WEEK = 7;
 const CELL_WIDTH = 100; // Width of each day cell in pixels (reduced for multi-week)
@@ -18,6 +19,202 @@ const TOP_HEADER_HEIGHT = 80; // Height of the top header (increased for navigat
 const INACTIVE_BOOKING_STATUSES = new Set(['CANCELLED', 'EXPIRED', 'REJECTED', 'DECLINED']);
 const CONFIRMED_BOOKING_STATUSES = new Set(['CONFIRMED', 'APPROVED']);
 const PENDING_BOOKING_STATUSES = new Set(['PENDING', 'CONFLICTING']);
+const MAINTENANCE_SEGMENTS = {
+    '7 AM - 12 PM': { startHour: 7, endHour: 12 },
+    '12 PM - 6 PM': { startHour: 12, endHour: 18 },
+    '6 PM - 11 PM': { startHour: 18, endHour: 23 },
+};
+
+/**HELPER FUNCTIONS */
+function isDeviceInMaintenanceOnDate(device, dateStr) {
+    const window = parseMaintenanceWindow(device);
+    if (!window) {
+        return false;
+    }
+
+    const dayStart = parseLocalDate(dateStr);
+    if (!dayStart) {
+        return false;
+    }
+    dayStart.setHours(0, 0, 0, 0);
+
+    const dayEnd  = addDaysLocal(dayStart, 1);
+    dayEnd.setHours(0, 0, 0, 0);
+
+    return window.start < dayEnd && window.end > dayStart;
+}
+
+function getMaintenanceLabel(device) {
+    const window = parseMaintenanceWindow(device);
+    if (!window) {
+        return 'Maintenance';
+    }
+
+    const startLabel = window.start.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+    const endLabel = window.end.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+
+    return `Maintenance (${startLabel} to ${endLabel})`;
+}
+
+function getCellClasses(cellState, inDragRange = false) {
+    let cellClasses = 'flex-1 border border-gray-200 dark:border-gray-700 transition-colors duration-150 rounded-lg ';
+
+    if (cellState === 'past') {
+        cellClasses += 'bg-neutral-100 dark:bg-neutral-800 opacity-50 cursor-not-allowed pattern-diagonal-lines';
+    } else if (cellState === 'newlyConfirmed') {
+        cellClasses += 'bg-green-400 dark:bg-green-600 animate-pulse cursor-not-allowed border-green-500 dark:border-green-700 shadow-md';
+    } else if (cellState === 'maintenance') {
+        cellClasses += 'text-orange-800 dark:text-orange-100 border-2 border-orange-400 dark:border-orange-600 cursor-not-allowed shadow-sm relative overflow-hidden';
+    } else if (cellState === 'selected') {
+        cellClasses += 'cursor-pointer shadow-md';
+    } else if (cellState === 'conflicting') {
+        cellClasses += 'bg-red-500 dark:bg-red-400 hover:bg-red-600 dark:hover:bg-red-500 cursor-pointer border-red-600 dark:border-red-500 shadow-sm';
+    } else if (cellState === 'ownedPending') {
+        cellClasses += 'bg-amber-400 hover:bg-amber-500 border-amber-500 text-black cursor-pointer shadow-sm pattern-diagonal-lines';
+    } else if (cellState === 'ownedConfirmed') {
+        cellClasses += 'bg-emerald-400 hover:bg-emerald-500 border-emerald-500 text-white cursor-not-allowed shadow-md pattern-diagonal-lines';
+    } else if (cellState === 'booked') {
+        cellClasses += 'cursor-not-allowed opacity-60 pattern-diagonal-lines';
+    } else if (cellState === 'bookedConfirmed') {
+        cellClasses += 'bg-gray-400 hover:bg-gray-500 border-gray-500 text-white cursor-not-allowed shadow-md pattern-diagonal-lines';
+    } else if (cellState === 'bookedPending') {
+        cellClasses += 'bg-yellow-500 hover:bg-yellow-600 text-black cursor-pointer shadow-sm pattern-diagonal-lines';
+    } else if (inDragRange) {
+        cellClasses += 'cursor-pointer ring-2';
+    } else {
+        cellClasses += 'bg-neutral-100 dark:bg-neutral-800 cursor-pointer';
+    }
+
+    return cellClasses;
+}
+
+function getCellTitle(cellState, device, day, bookedInfo, currentUserName) {
+    if (cellState === 'past') {
+        return `${device.deviceName} - ${day.fullLabel} (Past)`;
+    }
+
+    if (cellState === 'maintenance') {
+        return `${device.deviceName} - ${day.fullLabel} (${getMaintenanceLabel(device)})`;
+    }
+
+    if (cellState === 'ownedPending') {
+        return `${device.deviceName} - ${day.fullLabel} (Awaiting approval for your booking)`;
+    }
+
+    if (cellState === 'ownedConfirmed') {
+        return `${device.deviceName} - ${day.fullLabel} (Your booking is confirmed)`;
+    }
+
+    if (cellState === 'booked') {
+        const ownerLabel = bookedInfo?.ownerUsername || 'Another user';
+        const collaboratorsList = bookedInfo?.collaborators || [];
+        const isOwnedByUser =
+            currentUserName &&
+            ownerLabel &&
+            ownerLabel.toLowerCase() === currentUserName.toLowerCase();
+
+        if (isOwnedByUser) {
+            return `${device.deviceName} - ${day.fullLabel} (Booked by You${collaboratorsList.length ? ` with ${collaboratorsList.join(', ')}` : ''})`;
+        }
+
+        if (collaboratorsList.length > 0) {
+            return `${device.deviceName} - ${day.fullLabel} (Shared booking by ${ownerLabel} with ${collaboratorsList.join(', ')})`;
+        }
+
+        return `${device.deviceName} - ${day.fullLabel} (Booked by ${ownerLabel})`;
+    }
+
+    if (cellState === 'conflicting') {
+        return `${device.deviceName} - ${day.fullLabel} (Conflict: Already booked)`;
+    }
+
+    if (cellState === 'bookedPending') {
+        return `${device.deviceName} - ${day.fullLabel} (Awaiting approval by another user)`;
+    }
+
+    return `${device.deviceName} - ${day.fullLabel} (${cellState})`;
+}
+
+function getCellStyle(cellState, inDragRange, bookedBg, bookedBorder) {
+    return {
+        height: ROW_HEIGHT - 8,
+        minWidth: CELL_WIDTH - 16,
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        ...(cellState === 'selected'
+            ? {
+                backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
+                borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
+            }
+            : cellState === 'maintenance'
+            ? {
+                background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.18) 0px, rgba(249,115,22,0.18) 8px, rgba(251,146,60,0.32) 8px, rgba(251,146,60,0.32) 16px)',
+                backgroundColor: 'rgba(251, 146, 60, 0.22)',
+                borderColor: 'rgb(249, 115, 22)',
+                borderWidth: '2px',
+            }
+            : cellState === 'booked'
+            ? {
+                backgroundColor: bookedBg,
+                borderColor: bookedBorder,
+                transition: 'background-color 0.3s ease-in-out, border-color 0.3s ease-in-out',
+            }
+            : inDragRange
+            ? {
+                backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) + 20%))`,
+                borderColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
+            }
+            : cellState === 'bookedPending'
+            ? {
+                backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
+                borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
+                opacity: 0.6,
+            }
+            : {}),
+    };
+}
+
+function parseMaintenanceMarker(value, isEnd = false){
+    if (!value) return null;
+
+    const [segment, dateStr] = value.split('/');
+    const day = parseLocalDate(dateStr);
+    if (!day) return null;
+
+    if (segment === 'All Day') {
+        day.setHours(0, 0, 0, 0);
+        return isEnd ? addDaysLocal(day, 1) : day;
+    }
+
+    const segmentConfig = MAINTENANCE_SEGMENTS[segment];
+    if (!segmentConfig) return null;
+
+    const result = new Date(day);
+    result.setHours(isEnd ? segmentConfig.endHour : segmentConfig.startHour, 0, 0, 0);
+    return result;
+}
+
+function parseMaintenanceWindow(device) {
+    const start = parseMaintenanceMarker(device?.maintenance_start, false);
+    const end = parseMaintenanceMarker(device?.maintenance_end, true);
+
+    if (!start || !end || end <= start) {
+        return null;
+    }
+
+    return { start, end };
+}
+
 
 /**
  * TimelineGrid component that displays devices as rows and days as columns
@@ -73,7 +270,10 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
     useDocumentObserver(updateColors, ['class', 'style']);
 
     // Get newly confirmed days for highlighting
-    const newlyConfirmedDays = ui.newlyConfirmedDays || new Set();
+    const newlyConfirmedDays = useMemo(
+        () => ui.newlyConfirmedDays || new Set(),
+        [ui.newlyConfirmedDays]
+    );
     const hasActiveSearchFilters =
         Boolean(filters?.searchQuery?.trim()) ||
         (filters?.deviceTypes?.length ?? 0) > 0 ||
@@ -85,13 +285,13 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
 
         // If date range is set, show all days in range
         if (ui.dateRange?.start && ui.dateRange?.end) {
-            const start = new Date(ui.dateRange.start);
-            const end = new Date(ui.dateRange.end);
-            const current = new Date(start);
+            const start = parseLocalDate(ui.dateRange.start);
+            const end = parseLocalDate(ui.dateRange.end);
+            let current = new Date(start);
 
             while (current <= end) {
                 days.push({
-                    date: current.toISOString().split('T')[0],
+                    date: formatLocalDateKey(current),
                     label: current.toLocaleDateString('en-US', { weekday: 'short' }),
                     fullLabel: current.toLocaleDateString('en-US', {
                         weekday: 'short',
@@ -100,7 +300,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                     }),
                     dayObj: new Date(current),
                 });
-                current.setDate(current.getDate() + 1);
+                current = addDaysLocal(current, 1);
             }
 
             return days;
@@ -118,7 +318,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
             const day = new Date(monday);
             day.setDate(monday.getDate() + i);
             days.push({
-                date: day.toISOString().split('T')[0],
+                date: formatLocalDateKey(day),
                 label: day.toLocaleDateString('en-US', { weekday: 'short' }),
                 fullLabel: day.toLocaleDateString('en-US', {
                     weekday: 'short',
@@ -130,7 +330,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
         }
 
         return days;
-    }, [selectedDate, timeline.ui?.dateRange]);
+    }, [selectedDate, ui.dateRange.start, ui.dateRange.end]);
     
     // Setting content and grid sizing globally
     const timelineContentWidth = CELL_WIDTH * Math.max(DAYS_IN_WEEK, weekDays.length);
@@ -323,7 +523,8 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
     const isPastDate = useCallback((dateStr) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const date = new Date(dateStr);
+        const date = parseLocalDate(dateStr);
+        if (!date) return false;
         date.setHours(0, 0, 0, 0);
         return date < today;
     }, []);
@@ -396,8 +597,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
     }, [bookings, weekDays, getDayKey, devices]);
 
     // Get selections and check for conflicts
-    const selections = useMemo(() => getSelections(), [selectedSlots, getSelections]);
-
+    const selections = useMemo(() => getSelections(), [getSelections]);
     useEffect(() => {
         const weekDateStrs = new Set(weekDays.map(d => d.date));
         const weekSelections = selections.filter((s) => weekDateStrs.has(s.date));
@@ -416,12 +616,20 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
     const getCellState = useCallback(
         (deviceId, dateStr) => {
             const dayKey = getDayKey(deviceId, dateStr);
+            const device = devices.find((item) => item.id === deviceId);
+
+            if (!device) {
+                return 'available';
+            }
 
             if (isPastDate(dateStr)) {
                 return 'past';
             }
 
-            // Check if newly confirmed (highlight in green)
+            if (isDeviceInMaintenanceOnDate(device, dateStr)) {
+                return 'maintenance';
+            }
+
             if (newlyConfirmedDays.has(dayKey)) {
                 return 'newlyConfirmed';
             }
@@ -441,36 +649,30 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                 const isOwner = currentUserLower && ownerLower === currentUserLower;
 
                 if (isOwner) {
-                    if (CONFIRMED_BOOKING_STATUSES.has(statusKey)) {
-                        return 'ownedConfirmed';
-                    }
-                    if (PENDING_BOOKING_STATUSES.has(statusKey)) {
-                        return 'ownedPending';
-                    }
+                    if (CONFIRMED_BOOKING_STATUSES.has(statusKey)) return 'ownedConfirmed';
+                    if (PENDING_BOOKING_STATUSES.has(statusKey)) return 'ownedPending';
                 }
 
                 const collaborators = bookingInfo?.collaborators || [];
                 if (
                     currentUserLower &&
                     collaborators.some(
-                        (name) => typeof name === 'string' && name.toLowerCase() === currentUserLower)
+                        (name) => typeof name === 'string' && name.toLowerCase() === currentUserLower
+                    )
                 ) {
-                    if (CONFIRMED_BOOKING_STATUSES.has(statusKey)) {
-                        return 'ownedConfirmed';
-                    }
-                    if (PENDING_BOOKING_STATUSES.has(statusKey)) {
-                        return 'ownedPending';
-                    }
+                    if (CONFIRMED_BOOKING_STATUSES.has(statusKey)) return 'ownedConfirmed';
+                    if (PENDING_BOOKING_STATUSES.has(statusKey)) return 'ownedPending';
                 }
+
                 if (CONFIRMED_BOOKING_STATUSES.has(statusKey)) return 'bookedConfirmed';
                 if (PENDING_BOOKING_STATUSES.has(statusKey)) return 'bookedPending';
 
                 return 'booked';
-                }
+            }
 
             return 'available';
         },
-        [isDaySelected, bookedDays, conflicts, isPastDate, getDayKey, newlyConfirmedDays, currentUserName]
+        [isDaySelected, bookedDays, conflicts, isPastDate, getDayKey, newlyConfirmedDays, currentUserName, devices]
     );
 
     // Helper for selecting cells that are already booked
@@ -478,25 +680,16 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
     //      the user is a collaborator in the cells booking,
     //      if there is any booking in the cell already.
     // Returns a boolean variable
-    const canSelectCell = useCallback((deviceID, dateStr) => {
+    const canSelectCell = useCallback((deviceId, dateStr) => {
         if (isPastDate(dateStr)) return false;
 
-    //     const dayKey = getDayKey(deviceID, dateStr);
-    //     const bookingInfo = bookedDays.get(dayKey);
-    //     if(!bookingInfo) return true; // free slot check
-
-    //     const currentUserLower = currentUserName ? currentUserName.toLowerCase() : null;
-    //     const ownerLower = (bookingInfo.ownerUsername || '').toLowerCase();
-    //     const collaborators = Array.isArray(bookingInfo.collaborators) ? bookingInfo.collaborators : [];
-
-    //     const isMine = 
-    //         currentUserLower &&
-    //         (ownerLower === currentUserLower ||
-    //                 collaborators.some((n) => typeof n === 'string' && n.toLowerCase() === currentUserLower));
-    //     return !isMine;
-    // }, [bookedDays, currentUserName, getDayKey, isPastDate]);
-        const state = getCellState(deviceID, dateStr);
-        return state === 'available' || state === 'selected' || state === 'conflicting' || state === 'bookedPending';
+        const state = getCellState(deviceId, dateStr);
+        return (
+            state === 'available' ||
+            state === 'selected' ||
+            state === 'conflicting' ||
+            state === 'bookedPending'
+        );
     }, [getCellState, isPastDate]);
 
 
@@ -519,7 +712,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                 });
             });
         },
-    }, [navigateWeek, visibleDevices, weekDays, isPastDate, bookedDays, getDayKey, isDaySelected, toggleDay]);
+    }, [toggleDay, isPastDate, dragStart, visibleDevices, weekDays, isDaySelected, canSelectCell]);
 
     // Handle day click - toggle selection (used for keyboard events and non-virtualized rendering)
     const handleDayClick = useCallback(
@@ -589,7 +782,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
         setIsDragging(true);
         setDragStart({ deviceId, date: dateStr });
         setDragEnd({ deviceId, date: dateStr });
-    }, [isPastDate, getDayKey, bookedDays]);
+    }, [isPastDate, canSelectCell]);
 
     // Handle drag over
     const handleDragOver = useCallback((deviceId, dateStr, event) => {
@@ -608,7 +801,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
         }
 
         setDragEnd({ deviceId, date: dateStr });
-    }, [isDragging, dragStart, isPastDate, getDayKey, bookedDays]);
+    }, [isDragging, dragStart, isPastDate, canSelectCell]);
 
     // Handle drag end - also handles simple clicks
     const handleDragEnd = useCallback((deviceId, dateStr) => {
@@ -673,7 +866,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
         setTimeout(() => {
             justDraggedRef.current = false;
         }, 100);
-    }, [isDragging, dragStart, dragEnd, visibleDevices, weekDays, isPastDate, getDayKey, bookedDays, isDaySelected, toggleDay]);
+    }, [isDragging, dragStart, dragEnd, visibleDevices, weekDays, isPastDate, isDaySelected, toggleDay, canSelectCell]);
 
     // Check if cell is in drag range
     const isInDragRange = useCallback((deviceId, dateStr) => {
@@ -740,6 +933,8 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
 
                         if (cellState === 'past') {
                             cellClasses += 'bg-neutral-100 dark:bg-neutral-800 opacity-50 cursor-not-allowed';
+                        } else if (cellState === 'maintenance') {
+                            cellClasses += 'text-orange-800 dark:text-orange-100 border-2 border-orange-400 dark:border-orange-600 cursor-not-allowed shadow-sm relative overflow-hidden';
                         } else if (cellState === 'selected') {
                             cellClasses += 'cursor-pointer shadow-md';
                         } else if (cellState === 'conflicting') {
@@ -751,18 +946,20 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                         } else if (cellState === 'booked') {
                             cellClasses += 'cursor-not-allowed opacity-60';
                         } else if (cellState === 'bookedConfirmed') {
-                            cellClasses += 'bg-gray-500 hover:bg-gray-600 text-white cursor-not-allowed shadow-md pattern-diagonal-lines'
-                        } else if (cellState === 'bookedPending'){
+                            cellClasses += 'bg-gray-500 hover:bg-gray-600 text-white cursor-not-allowed shadow-md pattern-diagonal-lines';
+                        } else if (cellState === 'bookedPending') {
                             cellClasses += 'bg-yellow-500 hover:bg-yellow-600 text-black cursor-pointer shadow-sm pattern-diagonal-lines';
                         } else {
-                            // Use CSS :hover for available cells - no React state needed
                             cellClasses += 'bg-neutral-100 dark:bg-neutral-800 cursor-pointer';
                         }
 
                         const bookedInfo = bookedDays.get(getDayKey(device.id, day.date));
                         let title;
+
                         if (cellState === 'past') {
                             title = `${device.deviceName} - ${day.fullLabel} (Past)`;
+                        } else if (cellState === 'maintenance') {
+                            title = `${device.deviceName} - ${day.fullLabel} (Unavailable: device is in maintenance)`;
                         } else if (cellState === 'booked') {
                             const ownerLabel = bookedInfo?.ownerUsername || 'Another user';
                             const collaboratorsList = bookedInfo?.collaborators || [];
@@ -770,6 +967,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                 currentUserName &&
                                 ownerLabel &&
                                 ownerLabel.toLowerCase() === currentUserName.toLowerCase();
+
                             if (isOwnedByUser) {
                                 title = `${device.deviceName} - ${day.fullLabel} (Booked by You${collaboratorsList.length ? ` with ${collaboratorsList.join(', ')}` : ''})`;
                             } else if (collaboratorsList.length > 0) {
@@ -786,39 +984,63 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                         const cellStyle = {
                             height: ROW_HEIGHT - 8,
                             minWidth: CELL_WIDTH - 16,
-                            ...(cellState === 'selected' ? {
-                                backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                                borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
-                            // } : cellState === 'ownedPending' ? {
-                            //     backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                            //     borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
-                            //     opacity: 0.6,
-                            // } : cellState === 'ownedConfirmed' ? {
-                            //     backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                            //     borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
-                            //     opacity: 0.6,
-                            } : cellState === 'booked' ? {
-                                backgroundColor: bookedBg,
-                                borderColor: bookedBorder,
-                                transition: 'background-color 0.3s ease-in-out, border-color 0.3s ease-in-out',
-                            } : cellState === 'bookedPending' ? {
-                                backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                                borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
-                                opacity: 0.6,
-                            } : {})
+                            ...(cellState === 'selected'
+                                ? {
+                                    backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
+                                    borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
+                                }
+                                : cellState === 'maintenance'
+                                ? {
+                                    background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.18) 0px, rgba(249,115,22,0.18) 8px, rgba(251,146,60,0.32) 8px, rgba(251,146,60,0.32) 16px)',
+                                    backgroundColor: 'rgba(251, 146, 60, 0.22)',
+                                    borderColor: 'rgb(249, 115, 22)',
+                                    borderWidth: '2px',
+                                }
+                                : cellState === 'booked'
+                                ? {
+                                    backgroundColor: bookedBg,
+                                    borderColor: bookedBorder,
+                                    transition: 'background-color 0.3s ease-in-out, border-color 0.3s ease-in-out',
+                                }
+                                : cellState === 'bookedPending'
+                                ? {
+                                    backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
+                                    borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
+                                    opacity: 0.6,
+                                }
+                                : {}),
                         };
+
+                        const isMaintenance = cellState === 'maintenance';
+                        const isBlocked =
+                            cellState === 'past' ||
+                            cellState === 'maintenance' ||
+                            cellState === 'booked' ||
+                            cellState === 'bookedConfirmed' ||
+                            cellState === 'ownedConfirmed';
 
                         const isHoverable = cellState === 'selected' || cellState === 'ownedPending' || cellState === 'ownedConfirmed';
                         const hoverableClass = isHoverable ? 'timeline-cell-hoverable' : '';
-                        
+
                         return (
                             <div
                                 key={day.date}
                                 style={cellStyle}
                                 className={`${cellClasses} ${hoverableClass}`}
-                                onClick={() => handleDayClick(device.id, day.date)}
+                                onClick={isBlocked ? undefined : () => handleDayClick(device.id, day.date)}
+                                onMouseDown={isBlocked ? undefined : (event) => handleDragStart(device.id, day.date, event)}
+                                onMouseEnter={isBlocked ? undefined : (event) => handleDragOver(device.id, day.date, event)}
+                                onMouseUp={isBlocked ? undefined : () => handleDragEnd(device.id, day.date)}
                                 title={title}
-                            />
+                            >
+                                {isMaintenance && (
+                                    <div className="flex h-full w-full items-center justify-center">
+                                        <span className="rounded bg-white/85 dark:bg-black/35 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-orange-900 dark:text-orange-100">
+                                            Maint
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
                         );
                     })}
                 </div>
@@ -1028,7 +1250,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                                 // Select all days in current week for all devices in this group
                                                 typeDevices.forEach(device => {
                                                     const candidateDates = weekDays
-                                                        .filter(day => !isPastDate(day.date)) //  && !bookedDays.has(getDayKey(device.id, day.date))
+                                                        .filter(day => !isPastDate(day.date) && canSelectCell(device.id, day.date))
                                                         .map(day => day.date);
                                                     if (candidateDates.length > 0) {
                                                         addDeviceDates(device.id, candidateDates);
@@ -1104,94 +1326,19 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                                                 {weekDays.map((day) => {
                                                                     const cellState = getCellState(device.id, day.date);
                                                                     const inDragRange = isInDragRange(device.id, day.date);
-
-                                                                    let cellClasses = 'flex-1 border border-gray-200 dark:border-gray-700 transition-colors duration-150 rounded-lg ';
-
-                                                                    if (cellState === 'past') {
-                                                                        cellClasses += 'bg-neutral-100 dark:bg-neutral-800 opacity-50 cursor-not-allowed';
-                                                                        // Add pattern for past dates
-                                                                        cellClasses += ' pattern-diagonal-lines';
-                                                                    } else if (cellState === 'newlyConfirmed') {
-                                                                        // Green highlight that fades to booked
-                                                                        cellClasses += 'bg-green-400 dark:bg-green-600 animate-pulse cursor-not-allowed border-green-500 dark:border-green-700 shadow-md';
-                                                                    } else if (cellState === 'selected') {
-                                                                        cellClasses += 'cursor-pointer shadow-md';
-                                                                    } else if (cellState === 'conflicting') {
-                                                                        cellClasses += 'bg-red-500 dark:bg-red-400 hover:bg-red-600 dark:hover:bg-red-500 cursor-pointer border-red-600 dark:border-red-500 shadow-sm';
-                                                                    } else if (cellState === 'ownedPending') {
-                                                                        cellClasses += 'bg-amber-400 hover:bg-amber-500 border-amber-500 text-black cursor-pointer shadow-sm pattern-diagonal-lines';
-                                                                    } else if (cellState === 'ownedConfirmed') {
-                                                                        cellClasses += 'bg-emerald-400 hover:bg-emerald-500 border-emerald-500 text-white cursor-not-allowed shadow-md pattern-diagonal-lines';
-                                                                    } else if (cellState === 'booked') {
-                                                                        cellClasses += 'cursor-not-allowed opacity-60';
-                                                                        // Add pattern for booked dates
-                                                                        cellClasses += 'pattern-diagonal-lines';
-                                                                    } else if (cellState === 'bookedConfirmed') {
-                                                                        cellClasses += 'bg-gray-400 hover:bg-gray-500 border-gray-500 text-white cursor-not-allowed shadow-md pattern-diagonal-lines';
-                                                                    } else if (cellState === 'bookedPending'){
-                                                                        cellClasses += 'bg-yellow-500 hover:bg-yellow-600 text-black cursor-pointer shadow-sm pattern-diagonal-lines';
-                                                                    } else {
-                                                                        if (inDragRange) {
-                                                                            // Highlight cells in drag range (for drag selection)
-                                                                            cellClasses += 'cursor-pointer ring-2';
-                                                                        } else {
-                                                                            // Use CSS :hover for available cells - no React state needed
-                                                                            cellClasses += 'bg-neutral-100 dark:bg-neutral-800 cursor-pointer';
-                                                                        }
-                                                                    }
+                                                                    const cellClasses = getCellClasses(cellState, inDragRange);
 
                                                                     const bookedInfo = bookedDays.get(getDayKey(device.id, day.date));
-                                                                    let title;
-                                                                    if (cellState === 'past') {
-                                                                        title = `${device.deviceName} - ${day.fullLabel} (Past)`;
-                                                                    } else if (cellState === 'ownedPending') {
-                                                                        title = `${device.deviceName} - ${day.fullLabel} (Awaiting approval for your booking)`;
-                                                                    } else if (cellState === 'ownedConfirmed') {
-                                                                        title = `${device.deviceName} - ${day.fullLabel} (Your booking is confirmed)`;
-                                                                    } else if (cellState === 'booked') {
-                                                                        const ownerLabel = bookedInfo?.ownerUsername || 'Another user';
-                                                                        const collaboratorsList = bookedInfo?.collaborators || [];
-                                                                        if (collaboratorsList.length > 0) {
-                                                                            title = `${device.deviceName} - ${day.fullLabel} (Shared booking by ${ownerLabel} (with ${collaboratorsList.join(', ')}))`;
-                                                                        } else {
-                                                                            title = `${device.deviceName} - ${day.fullLabel} (Booked by ${ownerLabel})`;
-                                                                        }
-                                                                    } else if (cellState === 'conflicting') {
-                                                                        title = `${device.deviceName} - ${day.fullLabel} (Conflict: Already booked)`;
-                                                                    } else if (cellState === 'bookedPending') {
-                                                                        title = `${device.deviceName} - ${day.fullLabel} (Awaiting approval by another user)`;
-                                                                    } else {
-                                                                        title = `${device.deviceName} - ${day.fullLabel} (${cellState})`;
-                                                                    }
-
-                                                                    const cellStyle = {
-                                                                        height: ROW_HEIGHT - 8,
-                                                                        minWidth: CELL_WIDTH - 16,
-                                                                        userSelect: 'none',
-                                                                        WebkitUserSelect: 'none',
-                                                                        ...(cellState === 'selected' ? {
-                                                                            backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                                                                            borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
-                                                                        // } : cellState === 'ownedPending' ? {
-                                                                        //     backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                                                                        //     borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
-                                                                        //     opacity: 0.6,
-                                                                        // } : cellState === 'ownedConfirmed' ? {
-                                                                        //     backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                                                                        //     borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
-                                                                        //     opacity: 0.6,
-                                                                        } : cellState === 'booked' ? {
-                                                                            backgroundColor: bookedBg,
-                                                                            borderColor: bookedBorder,
-                                                                        } : inDragRange ? {
-                                                                            backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) + 20%))`,
-                                                                            borderColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                                                                        } : cellState === 'bookedPending' ? {
-                                                                            backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                                                                            borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
-                                                                            opacity: 0.6,
-                                                                        } : {})
-                                                                    };
+                                                                    const title = getCellTitle(cellState, device, day, bookedInfo, currentUserName);
+                                                                    const cellStyle = getCellStyle(cellState, inDragRange, bookedBg, bookedBorder);
+                                                                    const isBlocked =
+                                                                        cellState === 'past' ||
+                                                                        cellState === 'newlyConfirmed' ||
+                                                                        cellState === 'maintenance' ||
+                                                                        cellState === 'booked' ||
+                                                                        cellState === 'bookedConfirmed' ||
+                                                                        cellState === 'ownedConfirmed';
+                                                                    const isMaintenance = cellState === 'maintenance';
 
                                                                     const isHoverable = cellState === 'selected' || cellState === 'ownedPending' || cellState === 'ownedConfirmed';
                                                                     const hoverableClass = isHoverable ? 'timeline-cell-hoverable' : '';
@@ -1202,10 +1349,10 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                                                             data-date={day.date}
                                                                             style={cellStyle}
                                                                             className={`${cellClasses} ${hoverableClass}`}
-                                                                            onMouseDown={(e) => {
+                                                                            onMouseDown={isBlocked ? undefined : (e) => {
                                                                                 handleDragStart(device.id, day.date, e);
                                                                             }}
-                                                                            onMouseEnter={(e) => {
+                                                                            onMouseEnter={isBlocked ? undefined : (e) => {
                                                                                 // Process mouseEnter first to update drag state before mouseUp
                                                                                 // Only handle drag range highlighting here - hover for selected cells is handled by CSS
                                                                                 if (inDragRange) {
@@ -1217,7 +1364,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                                                                     handleDragOver(device.id, day.date, e);
                                                                                 }
                                                                             }}
-                                                                            onMouseUp={(e) => {
+                                                                            onMouseUp={isBlocked ? undefined : (e) => {
                                                                                 // Ensure current cell is included in drag selection by updating dragEnd if dragging
                                                                                 if (isDragging && dragStart) {
                                                                                     // Update dragEnd to current cell to ensure it's included
@@ -1231,7 +1378,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                                                                     handleDragEnd(device.id, day.date);
                                                                                 }
                                                                             }}
-                                                                            onMouseLeave={(e) => {
+                                                                            onMouseLeave={isBlocked ? undefined : (e) => {
                                                                                 // Only handle drag range highlighting here - hover for selected cells is handled by CSS
                                                                                 if (inDragRange) {
                                                                                     e.currentTarget.style.borderColor = `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`;
@@ -1245,11 +1392,11 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                                                             }}
                                                                             title={title}
                                                                             role="button"
-                                                                            tabIndex={['past', 'newlyConfirmed', 'ownedPending', 'ownedConfirmed'].includes(cellState) ? -1 : 0} // 'booked',
+                                                                            tabIndex={isBlocked || cellState === 'ownedPending' ? -1 : 0}
                                                                             aria-label={title}
-                                                                            aria-disabled={['past', 'newlyConfirmed', 'ownedPending', 'ownedConfirmed'].includes(cellState)} // 'booked',
+                                                                            aria-disabled={isBlocked || cellState === 'ownedPending'}
                                                                             onKeyDown={(e) => {
-                                                                                if ((e.key === 'Enter' || e.key === ' ') && !['past', 'newlyConfirmed', 'ownedPending', 'ownedConfirmed'].includes(cellState)) { // 'booked',
+                                                                                if ((e.key === 'Enter' || e.key === ' ') && !(isBlocked || cellState === 'ownedPending')) {
                                                                                     e.preventDefault();
                                                                                     handleDayClick(device.id, day.date, e);
                                                                                 }
@@ -1261,7 +1408,15 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                                                             onBlur={(e) => {
                                                                                 e.target.classList.remove('ring-2', 'ring-offset-2');
                                                                             }}
-                                                                        />
+                                                                        >
+                                                                            {isMaintenance && (
+                                                                                <div className="flex h-full w-full items-center justify-center">
+                                                                                    <span className="rounded bg-white/85 dark:bg-black/35 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-orange-900 dark:text-orange-100">
+                                                                                        Maint
+                                                                                    </span>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     );
                                                                 })}
                                                             </div>
@@ -1313,6 +1468,16 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                     <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-gray-400 dark:bg-gray-600 rounded-sm opacity-75" />
                         <span className="text-gray-600 dark:text-gray-400">Booked (Other user)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div
+                          className="w-4 h-4 rounded-sm border-2 border-orange-400 dark:border-orange-600"
+                          style={{
+                              background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.18) 0px, rgba(249,115,22,0.18) 4px, rgba(251,146,60,0.32) 4px, rgba(251,146,60,0.32) 8px)',
+                              backgroundColor: 'rgba(251, 146, 60, 0.22)',
+                          }}
+                        />
+                        <span className="text-gray-600 dark:text-gray-400">Maintenance</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-neutral-100 dark:bg-neutral-800 rounded-sm opacity-50" />

@@ -1157,7 +1157,10 @@
 .maintenance-slot {
   background-color: #888 !important;
   color: white !important;
+  border: 1px solid #991b1b !important;
   cursor: not-allowed !important;
+  pointer-events: none;
+  opacity: 0.92;
 }
 
 /* ================== Summary Panel (Right Panel) & Message & Submit ================== */

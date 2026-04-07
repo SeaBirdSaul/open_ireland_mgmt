@@ -3,6 +3,7 @@ Pytest configuration and fixtures for backend tests
 """
 import os
 import sys
+from fastapi.testclient import TestClient
 
 # IMPORTANT: Set test DATABASE_URL before importing database.py
 # database.py requires DATABASE_URL at import time, but tests override it anyway
@@ -130,9 +131,12 @@ def test_user(db_session):
     hashed_password = hash_password("testpassword123")
     user = User(
         username="testuser",
+        firstName="Test",
+        lastName="User",
         email="test@example.com",
         password=hashed_password,
         role="viewer",
+        status="active",
         discord_id="123456789"
     )
     db_session.add(user)
@@ -147,9 +151,12 @@ def test_admin(db_session):
     hashed_password = hash_password("adminpassword123")
     admin = User(
         username="testadmin",
+        firstName="Test",
+        lastName="Admin",
         email="admin@example.com",
         password=hashed_password,
         role="admin",
+        status="active",
         discord_id="987654321"
     )
     db_session.add(admin)
