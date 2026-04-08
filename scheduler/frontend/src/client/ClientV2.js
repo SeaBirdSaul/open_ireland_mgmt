@@ -462,9 +462,9 @@ function ClientV2Inner() {
   );
 
   const handleRegisterSubmit = useCallback(
-    async ({ username, email, firstName, lastName, password, confirmPassword }) => {
-      if (!username || !firstName || !lastName || !password || !confirmPassword) {
-        toast.error('Username and both password fields are required.');
+    async ({ username, email, firstName, lastName, password, confirmPassword, discordId }) => {
+      if (!username || !firstName || !lastName || !password || !confirmPassword || !discordId) {
+        toast.error('All fields are required.');
         return;
       }
       if (password.length < 8) {
@@ -473,6 +473,10 @@ function ClientV2Inner() {
       }
       if (password !== confirmPassword) {
         toast.error('Passwords do not match.');
+        return;
+      }
+      if (!/^\d{17,18}$/.test(discordId)) {
+        toast.error('Discord ID must be a 17 or 18 digit number');
         return;
       }
 
@@ -493,6 +497,7 @@ function ClientV2Inner() {
             lastName: lastName.trim(),
             password: hashedPassword,
             password2: hashedConfirm,
+            discord_id: discordId
           }),
         });
 
@@ -509,7 +514,7 @@ function ClientV2Inner() {
           setVerificationEmail(email || '');
           return;
         }
-        toast.success('Account created successfully. You are now signed in.');
+        toast.success('Account created successfully. Please log in.');
         setAuthModal(null);
         await safeRefreshAuth();
       } catch (err) {
@@ -1008,6 +1013,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [verifyToken, setVerifyToken] = useState('');
+  const [discordId, setDiscordId] = useState('');
 
   useEffect(() => {
     setUsername('');
@@ -1018,6 +1024,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
     setConfirmPassword('');
     setShowPassword(false);
     setShowConfirmPassword(false);
+    setDiscordId('');
 
     if (mode === 'forgotConfirm'){
       setResetToken(initialResetToken || '');
@@ -1044,7 +1051,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
       onLogin({ username, password });
     }
     if (mode === 'register') {
-      onRegister({ username, email, firstName, lastName, password, confirmPassword });
+      onRegister({ username, email, firstName, lastName, password, confirmPassword, discordId });
       return;
     }
     if (mode === 'forgotRequest') {
@@ -1110,7 +1117,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" onClick={onClose} role="dialog" aria-modal="true">
       <div
-        className="w-full max-w-xl rounded-2xl glass-panel shadow-2xl border border-gray-200/60 dark:border-gray-700/60 backdrop-blur"
+        className="w-full max-w-md rounded-2xl glass-panel shadow-2xl border border-gray-200/60 dark:border-gray-700/60 backdrop-blur max-h-[90vh] flex flex-col"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-200/70 dark:border-gray-700/70 px-6 py-4">
@@ -1118,7 +1125,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
           <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-100 transition-colors" aria-label="Close modal">✕</button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-6 py-6 space-y-4">
+        <form onSubmit={handleSubmit} className="px-6 py-6 space-y-4 flex-1 overflow-y-auto">
           {(isLogin || isRegister) && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-username">Username</label>
@@ -1130,6 +1137,13 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">Email</label>
               <input id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2" placeholder="you@example.com" required />
+            </div>
+          )}
+
+          {isRegister && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-discord-id">Discord ID</label>
+              <input id="auth-discord-id" type="text" value={discordId} onChange={(e) => setDiscordId(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2" placeholder="123456789012345678" required />
             </div>
           )}
 

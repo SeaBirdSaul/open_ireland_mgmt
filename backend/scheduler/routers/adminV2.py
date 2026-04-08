@@ -96,6 +96,8 @@ def get_dashboard(request: Request, db: Session = Depends(get_db)):
     pending_count = db.query(models.Booking).filter(models.Booking.status == "PENDING").count()
     device_counts = {
         "total": db.query(models.Device).count(),
+        "offline": db.query(models.Device).filter(models.Device.status == "Unavailable").count(),
+        "maintenance": db.query(models.Device).filter(models.Device.status == "Maintenance").count(),
     }
     recent_activity = db.query(models.AdminAuditLog).order_by(models.AdminAuditLog.id.desc()).limit(5).all()
     conflicting_count =(db.query(models.Booking).filter(models.Booking.status == "CONFLICTING").count())
@@ -569,7 +571,7 @@ def update_device_status(
                 
                 device.maintenance_start = payload.maintenance_start
                 device.maintenance_end = payload.maintenance_end
-                device.status = resolve_status_for_scheduled_maintenance(
+                device.maintenance_return_status = resolve_status_for_scheduled_maintenance(
                     requested_status = payload.status,
                     previous_status = previous_status,
                     maintenance_start = payload.maintenance_start,
@@ -583,7 +585,7 @@ def update_device_status(
                 if hasattr(device, "maintenance_return_status"):
                     device.maintenance_return_status = None
 
-                if is_maintenance_active_at(device.maintenance_start, device.maintenance_end):
+                if is_maintenance_active_at(maintenance_start = device.maintenance_start, maintenance_end = device.maintenance_end):
                     device.status = "Maintenance"
                     maintenance_candidates.append(device)
                     

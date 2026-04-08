@@ -8,6 +8,7 @@ import { useDevices } from '../../services/deviceService';
 import { useBookingsWithAdjacentWeeks, useBookingsForRange } from '../../services/bookingService';
 import useSchedulerStore from '../../store/schedulerStore';
 import TimelineGrid from './TimelineGrid';
+import { formatLocalDateKey } from './utils/localDate';
 
 export default function TimelinePanel({ userName }) {
   const { data: devices = [], isLoading, error } = useDevices();
@@ -34,13 +35,13 @@ export default function TimelinePanel({ userName }) {
 
   // Update weekStart in store when currentWeekStart changes
   useEffect(() => {
-    const weekStartStr = currentWeekStart.toISOString().split('T')[0];
+    const weekStartStr = formatLocalDateKey(currentWeekStart)
     setWeekStart(weekStartStr);
   }, [currentWeekStart, setWeekStart]);
 
   // Get selected date (use Monday of current week)
   const selectedDate = currentWeekStart;
-  const weekStart = currentWeekStart.toISOString().split('T')[0];
+  const weekStart = formatLocalDateKey(currentWeekStart)
 
   // Fetch bookings - use range if set, otherwise use week
   const {

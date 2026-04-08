@@ -734,7 +734,7 @@ def get_devices(request: Request, db: Session = Depends(get_db)):
     Use:
     - Registers a new user and starts a session.
 '''
-@app.post("/users/register", status_code=202)
+@app.post("/users/register", status_code=200, response_model=schemas.User)
 def register_user(
     user: schemas.UserCreate, db: Session = Depends(get_db), request: Request = None
 ):
@@ -746,17 +746,11 @@ def register_user(
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already taken.")
 
-    if user.email:
-        existing_email = db.query(models.User).filter(models.User.email == user.email).first()
-        if existing_email:
-            raise HTTPException(status_code=400, detail="Email already in use.")
+    existing_email = db.query(models.User).filter(models.User.email == user.email).first()
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already in use.")
         
-    normalized_email = (user.email or "").strip().lower() or None
-
-    if normalized_email:
-        existing_email = db.query(models.User).filter(models.User.email == normalized_email).first()
-        if existing_email:
-            raise HTTPException(status_code=400, detail="Email is already in use.")
+    normalized_email = user.email.strip().lower()
     # Hash the password
     # Client sends SHA256 hash, so we store bcrypt(SHA256) for security
     # This way verify_password(SHA256, bcrypt(SHA256)) will work
@@ -765,44 +759,52 @@ def register_user(
     # Create new user
     new_user = models.User(
         username=user.username,
-        email=user.email,
+        email=normalized_email,
+        discord_id=user.discord_id,
         firstName = user.firstName.strip(),
         lastName = user.lastName.strip(),
         password=hashed_pass,
         role = "viewer",
-        status="pending_email_verification",
+        status="active",
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    raw_token = generate_reset_token()
-    db.query(models.EmailVerificationToken).filter(
-        models.EmailVerificationToken.user_id == new_user.id,
-        models.EmailVerificationToken.consumed_at.is_(None),
-    ).update({"consumed_at": datetime.utcnow()}, synchronize_session=False)
+    # raw_token = generate_reset_token()
+    # db.query(models.EmailVerificationToken).filter(
+    #     models.EmailVerificationToken.user_id == new_user.id,
+    #     models.EmailVerificationToken.consumed_at.is_(None),
+    # ).update({"consumed_at": datetime.utcnow()}, synchronize_session=False)
 
-    db.add(models.EmailVerificationToken(
-        user_id = new_user.id,
-        token_hash = hash_token(raw_token),
-        expires_at = datetime.utcnow() + timedelta(minutes = _email_verify_ttl_minutes()),
-        requested_ip = (request.client.host if request and request.client else None),
-        requested_user_agent = (request.headers.get("user-agent") if request else None),
-    ))
-    db.commit()
+    # db.add(models.EmailVerificationToken(
+    #     user_id = new_user.id,
+    #     token_hash = hash_token(raw_token),
+    #     expires_at = datetime.utcnow() + timedelta(minutes = _email_verify_ttl_minutes()),
+    #     requested_ip = (request.client.host if request and request.client else None),
+    #     requested_user_agent = (request.headers.get("user-agent") if request else None),
+    # ))
+    # db.commit()
 
-    try:
-        send_email_verification_email(
-            to_email = new_user.email,
-            verify_url = _build_verify_link(raw_token),
-            ttl_minutes = _email_verify_ttl_minutes(),
-        )
-    except Exception as exc:
-        logger.exception("Failed to send verification email: %s", exc)
+    # try:
+    #     send_email_verification_email(
+    #         to_email = new_user.email,
+    #         verify_url = _build_verify_link(raw_token),
+    #         ttl_minutes = _email_verify_ttl_minutes(),
+    #     )
+    # except Exception as exc:
+    #     logger.exception("Failed to send verification email: %s", exc)
 
+    # return {
+    #     "message": "Registration successful. Please verify your email.",
+    #     "requires_email_verification": True,
+    # }
     return {
-        "message": "Registration successful. Please verify your email.",
-        "requires_email_verification": True,
+        "id": new_user.id,
+        "username": new_user.username,
+        "email": new_user.email,
+        "role": new_user.role,
+        "discord_id": new_user.discord_id,
     }
 
 
@@ -869,7 +871,7 @@ def login_user(
     # Store the user_id in Session
     session_id = create_user_session(db, user.id, request)
 
-    response = JSONResponse({"messsage": "Sign in successful", "user_id": user.id})
+    response = JSONResponse({"message": "Sign in successful", "user_id": user.id})
     response.set_cookie(
         key="session_id",
         value=session_id,
@@ -2497,23 +2499,29 @@ def rebook_booking_group(
     - Returns bookings where the user is owner or collaborator.
     - Updates expired booking statuses before returning results.
 '''
-@app.get("/bookings/user/{user_id}")
-def get_user_bookings(
-    user_id: int,
+@app.get("/bookings/my")
+def get_my_bookings(
     grouped: bool = Query(
         False, description="Return grouped booking sessions when true"
     ),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
 
-    user = db.query(models.User).get(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    # Get current user from session
+    current_user = get_user_from_session_cookie(db, request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    if (current_user.status or "").lower() != "active":
+        raise HTTPException(status_code=403, detail="Account not active")
+
+    user = current_user
 
     # Update the status of devices that are already expired but have not been updated
     now = datetime.now()
     db.query(models.Booking).filter(
-        models.Booking.user_id == user_id,
+        models.Booking.user_id == user.id,
         models.Booking.end_time < now,
         ~models.Booking.status.in_(
             ["CANCELLED", "EXPIRED"]
@@ -2527,8 +2535,8 @@ def get_user_bookings(
         db.query(models.Booking)
         .filter(
             or_(
-                models.Booking.user_id == user_id,
-                models.Booking.collaborators != None,  # noqa: E711
+                models.Booking.user_id == user.id,
+                models.Booking.collaborators.contains([user.username])
             )
         )
         .order_by(models.Booking.created_at.desc(), models.Booking.start_time.asc())
@@ -2587,7 +2595,7 @@ def get_user_bookings(
         if effective_collaborators is None:
             effective_collaborators = []
 
-        is_owner = (not booking.is_collaborator) and (booking.user_id == user_id)
+        is_owner = (not booking.is_collaborator) and (booking.user_id == user.id)
         is_collaborator = booking.is_collaborator or (
             not is_owner and user.username in effective_collaborators
         )
@@ -2764,11 +2772,15 @@ def get_user_bookings(
     Use:
     - Returns saved booking favorites for a user.
 '''
-@app.get("/bookings/favorites/{user_id}")
-def get_booking_favorites(user_id: int, db: Session = Depends(get_db)):
+@app.get("/bookings/favorites/my")
+def get_my_booking_favorites(request: Request = None, db: Session = Depends(get_db)):
+    current_user = get_user_from_session_cookie(db, request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
     favorites = (
         db.query(models.BookingFavorite)
-        .filter(models.BookingFavorite.user_id == user_id)
+        .filter(models.BookingFavorite.user_id == current_user.id)
         .order_by(models.BookingFavorite.updated_at.desc())
         .all()
     )

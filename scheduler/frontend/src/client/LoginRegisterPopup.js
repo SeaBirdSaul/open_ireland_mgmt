@@ -124,6 +124,10 @@ export default function LoginRegisterPopup({
             alert('Passwords do not match');
             return;
         }
+        if (!/^\d{17,18}$/.test(discordId)) {
+            alert('Discord ID must be a 17 or 18 digit number');
+            return;
+        }
 
         try {
             const hashedPass1 = CryptoJS.SHA256(pass1).toString();

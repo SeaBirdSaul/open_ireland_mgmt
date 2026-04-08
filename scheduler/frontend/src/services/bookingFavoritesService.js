@@ -4,11 +4,8 @@
  */
 import { API_BASE_URL } from '../config/api';
 
-export async function fetchFavorites(userId) {
-  if (!userId) {
-    return [];
-  }
-  const response = await fetch(`${API_BASE_URL}/bookings/favorites/${userId}`, {
+export async function fetchFavorites() {
+  const response = await fetch(`${API_BASE_URL}/bookings/favorites/my`, {
     credentials: 'include',
   });
   if (!response.ok) {

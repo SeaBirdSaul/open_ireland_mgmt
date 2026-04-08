@@ -187,7 +187,7 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
 
   const { data: bookingGroups = [], isLoading, error } = useQuery({
     queryKey: ['userBookingGroups', userId],
-    queryFn: () => fetchGroupedBookings(userId),
+    queryFn: () => fetchGroupedBookings(),
     enabled: Boolean(userId),
     staleTime: 30000,
     select: (groups) => (Array.isArray(groups) ? groups : []),
@@ -195,7 +195,7 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
 
   const { data: favorites = [] } = useQuery({
     queryKey: ['userFavorites', userId],
-    queryFn: () => fetchFavorites(userId),
+    queryFn: () => fetchFavorites(),
     enabled: Boolean(userId),
     staleTime: 30000,
   });

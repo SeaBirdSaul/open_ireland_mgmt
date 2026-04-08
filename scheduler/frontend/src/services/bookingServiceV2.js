@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../config/api';
+import { createLocalDateTime, formatLocalDateTime, parseLocalDateTime } from '../client/v2/utils/localDate';
 
 /**
  * Submit bookings to the backend
@@ -74,8 +75,8 @@ export async function submitBookings(
         }
 
         if (group.isDaily) {
-            const startDate = new Date(`${group.date}T00:01:00`);
-            const endDate = new Date(`${group.date}T23:59:00`);
+            const startDate = createLocalDateTime(group.date, 0, 1, 0);
+            const endDate = createLocalDateTime(group.date, 23, 59, 0);
             addRange(device, startDate, endDate);
         } else if (group.hours.length > 0) {
             // Hourly selection: merge consecutive hours
@@ -89,7 +90,7 @@ export async function submitBookings(
                     endExclusive = sortedHours[i] + 1;
                 } else {
                     // Non-consecutive, save current range and start a new one
-                    const startDate = new Date(`${group.date}T${startHour.toString().padStart(2, '0')}:00:00`);
+                    const startDate = createLocalDateTime(group.date, startHour, 0, 0);
                     const endDate = new Date(startDate);
                     endDate.setHours(endDate.getHours() + (endExclusive - startHour));
                     addRange(device, startDate, endDate);
@@ -100,7 +101,7 @@ export async function submitBookings(
             }
 
             // Add the last range
-            const startDate = new Date(`${group.date}T${startHour.toString().padStart(2, '0')}:00:00`);
+            const startDate = createLocalDateTime(group.date, startHour, 0, 0);
             const endDate = new Date(startDate);
             endDate.setHours(endDate.getHours() + (endExclusive - startHour));
             addRange(device, startDate, endDate);
@@ -112,8 +113,8 @@ export async function submitBookings(
         return {
             device_type: range.device_type,
             device_name: range.device_name,
-            start_time: range.start.toISOString(),
-            end_time: range.end.toISOString(),
+            start_time: formatLocalDateTime(range.start),
+            end_time: formatLocalDateTime(range.end),
             status: bookingStatus,
         };
     });
@@ -198,11 +199,11 @@ export function findConflicts(selections, bookings, options = {}) {
 
         if (slot.hour === null) {
             // Daily selection: check overlap with 07:00-19:00
-            slotStart = new Date(`${slot.date}T00:01:00`);
-            slotEnd = new Date(`${slot.date}T23:59:00`);
+            slotStart = createLocalDateTime(slot.date, 0, 1, 0);
+            slotEnd = createLocalDateTime(slot.date, 23, 59, 0);
         } else {
             // Hourly selection: check overlap with specific hour
-            slotStart = new Date(`${slot.date}T${slot.hour.toString().padStart(2, '0')}:00:00`);
+            slotStart = createLocalDateTime(slot.date, slot.hour, 0, 0);
             slotEnd = new Date(slotStart);
             slotEnd.setHours(slotEnd.getHours() + 1);
         }
@@ -233,8 +234,12 @@ export function findConflicts(selections, bookings, options = {}) {
 
             if (booking.device_id !== slot.deviceId) return false;
 
-            const bookingStart = new Date(booking.start_time);
-            const bookingEnd = new Date(booking.end_time);
+            const bookingStart = parseLocalDateTime(booking.start_time);
+            const bookingEnd = parseLocalDateTime(booking.end_time);
+
+            if (!bookingStart || !bookingEnd) {
+                return false;
+            }
 
             // Check for overlap
             return slotStart < bookingEnd && slotEnd > bookingStart;

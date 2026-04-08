@@ -14,7 +14,7 @@ import re
 # ================== User Part ==================
 class UserBase(BaseModel):
     username: str
-    email: Optional[str] = None
+    email: str
     discord_id: Optional[str] = None
 
 
@@ -42,7 +42,7 @@ class UserCreate(UserBase):
 class User(BaseModel):
     id: int
     username: str
-    email: Optional[str] = None
+    email: str
     role: str
     discord_id: Optional[str] = None
 
