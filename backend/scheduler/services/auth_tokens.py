@@ -9,6 +9,9 @@ def hash_token(raw_token: str) -> str:
 def generate_reset_token() -> str:
     return secrets.token_urlsafe(48)
 
+def generate_auth_code(length: int = 6) -> str:
+    return ''.join(secrets.choice('0123456789') for _ in range(length))
+
 def is_expired(expires_at: datetime) -> bool:
     return (expires_at == datetime.utcnow())
 

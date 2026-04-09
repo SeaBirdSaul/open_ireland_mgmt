@@ -5,12 +5,13 @@
     Backend API v2 router for admin operations 
 '''
 import hashlib
-from datetime import datetime, UTC, timedelta
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
 from pydantic import BaseModel
 import secrets
+import pytz
 
 from backend.scheduler import schemas, models
 from backend.core.deps import get_db
@@ -21,6 +22,9 @@ from backend.core.hash import hash_password
 from backend.scheduler.services.invitations import accept_invitation_record, serialize_invitation
 from backend.scheduler.services.sessions import get_user_from_session_cookie
 from backend.core.discord_utils import send_admin_action_notification
+# Timezone for Ireland
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
+
 from backend.scheduler.services.maintenance import (
     apply_maintenance_to_devices, 
     device_is_entering_maintenance,
@@ -230,24 +234,73 @@ def get_booking_details(bookingId: int, request: Request, db: Session = Depends(
     
     user = db.query(models.User).get(booking.user_id)
     device = db.query(models.Device).get(booking.device_id)
+    
+    # Get all bookings in the group
+    group_bookings = (
+        db.query(models.Booking)
+        .filter(models.Booking.grouped_booking_id == booking.grouped_booking_id)
+        .all()
+    )
+    
+    # Collect all devices and their time periods in the group
+    devices_in_group = []
+    device_ranges = {}
+    for gb in group_bookings:
+        dev = db.query(models.Device).get(gb.device_id)
+        device_key = (dev.deviceType, dev.deviceName)
+        if device_key not in device_ranges:
+            device_ranges[device_key] = {'start': gb.start_time, 'end': gb.end_time, 'device_id': dev.id}
+        else:
+            device_ranges[device_key]['start'] = min(device_ranges[device_key]['start'], gb.start_time)
+            device_ranges[device_key]['end'] = max(device_ranges[device_key]['end'], gb.end_time)
+    
+    for (device_type, device_name), times in device_ranges.items():
+        devices_in_group.append({
+            "name": device_name,
+            "type": device_type,
+            "start_time": times['start'].isoformat(),
+            "end_time": times['end'].isoformat(),
+        })
+    
+    # Collect all collaborators/users in the group
+    collaborators = []
+    collaborator_ids = set()
+    for gb in group_bookings:
+        if gb.user and gb.user_id not in collaborator_ids:
+            collaborators.append({
+                "id": gb.user.id,
+                "username": gb.user.username,
+            })
+            collaborator_ids.add(gb.user_id)
+    
+    # Find conflicting bookings for this group
     conflictingBookings = []
     if booking.status == "CONFLICTING":
+        # Get all devices in the group
+        group_device_ids = [gb.device_id for gb in group_bookings]
+        # Find any conflicting bookings on those devices during those times
         conflictingBookings = (
             db.query(models.Booking)
             .filter(
-                models.Booking.user_id != booking.user_id,
-                models.Booking.start_time == booking.start_time,
-                models.Booking.end_time == booking.end_time,
+                models.Booking.grouped_booking_id != booking.grouped_booking_id,
+                models.Booking.device_id.in_(group_device_ids),
                 models.Booking.status.notin_(["EXPIRED", "CANCELLED"]),
-                models.Booking.booking_id != booking.booking_id,
-                models.Booking.device_id == booking.device_id,
             )
             .all()
         )
+        # Filter to only those that actually overlap
+        conflictingBookings = [
+            c for c in conflictingBookings
+            if any(
+                not (c.end_time <= gb.start_time or c.start_time >= gb.end_time)
+                for gb in group_bookings
+            )
+        ]
 
     return {
         "booking": {
             "booking_id": booking.booking_id,
+            "grouped_booking_id": booking.grouped_booking_id,
             "status": booking.status,
             "comment": booking.comment,
             "user": { 
@@ -260,25 +313,57 @@ def get_booking_details(bookingId: int, request: Request, db: Session = Depends(
                 "type": device.deviceType,
             },
         },
+        "group_info": {
+            "is_group_booking": len(group_bookings) > 1,
+            "group_size": len(group_bookings),
+            "devices": devices_in_group,
+            "collaborators": collaborators,
+            "group_bookings": [
+                {
+                    "booking_id": gb.booking_id,
+                    "user": {
+                        "id": gb.user.id if gb.user else None,
+                        "username": gb.user.username if gb.user else "Unknown",
+                    },
+                    "device": {
+                        "id": gb.device_id,
+                        "name": db.query(models.Device).get(gb.device_id).deviceName if gb.device_id else "Unknown",
+                        "type": db.query(models.Device).get(gb.device_id).deviceType if gb.device_id else "Unknown",
+                    },
+                    "start_time": gb.start_time.isoformat(),
+                    "end_time": gb.end_time.isoformat(),
+                    "status": gb.status,
+                    "comment": gb.comment,
+                    "is_collaborator": bool(gb.is_collaborator),
+                    "collaborators": gb.collaborators or [],
+                }
+                for gb in group_bookings
+            ],
+        },
         "timeline": [
             {
-                "bookings_id": booking.booking_id,
-                "start_time": booking.start_time,
-                "end_time": booking.end_time,
-                "status": booking.status,
+                "bookings_id": gb.booking_id,
+                "start_time": gb.start_time.isoformat(),
+                "end_time": gb.end_time.isoformat(),
+                "status": gb.status,
                 "owner": {
-                    "username": user.username,
+                    "username": db.query(models.User).get(gb.user_id).username if gb.user_id else "Unknown",
                 },
-            },
+            }
+            for gb in group_bookings
         ],
         "conflicts": [
             {
                 "booking_id": c.booking_id,
                 "status": c.status,
-                "overlap_start": c.start_time,
-                "overlap_end": c.end_time,
+                "overlap_start": c.start_time.isoformat(),
+                "overlap_end": c.end_time.isoformat(),
                 "owner": {
-                    "username": db.query(models.User).get(c.user_id).username,
+                    "username": db.query(models.User).get(c.user_id).username if c.user_id else "Unknown",
+                },
+                "device": {
+                    "name": db.query(models.Device).get(c.device_id).deviceName if c.device_id else "Unknown",
+                    "type": db.query(models.Device).get(c.device_id).deviceType if c.device_id else "Unknown",
                 },
             }
             for c in conflictingBookings
@@ -291,52 +376,261 @@ def get_booking_details(bookingId: int, request: Request, db: Session = Depends(
         ],
         "history": [
             {
-                "booking_id": booking.booking_id,
-                "start_time": booking.start_time,
-                "end_time": booking.end_time,
-                "status": booking.status,
+                "booking_id": gb.booking_id,
+                "start_time": gb.start_time.isoformat(),
+                "end_time": gb.end_time.isoformat(),
+                "status": gb.status,
                 "owner": {
-                    "username": user.username,
+                    "username": db.query(models.User).get(gb.user_id).username if gb.user_id else "Unknown",
                 },
-            },
+            }
+            for gb in group_bookings
         ]
     }
 
 
 @router.post("/bookings/approve")
-def approve_bookings(payload: dict, request: Request, db: Session = Depends(get_db)):
+def approve_bookings(payload: dict, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     admin_required(request, db)
     booking_ids = payload.get("booking_ids", [])
     if not booking_ids:
         raise HTTPException(status_code=400, detail="booking_ids required")
 
-    db.query(models.Booking).filter(models.Booking.booking_id.in_(booking_ids)).update(
+    bookings = db.query(models.Booking).filter(models.Booking.booking_id.in_(booking_ids)).all()
+    if not bookings:
+        raise HTTPException(status_code=404, detail="No matching bookings found")
+
+    grouped_ids = {booking.grouped_booking_id for booking in bookings}
+
+    db.query(models.Booking).filter(models.Booking.grouped_booking_id.in_(grouped_ids)).update(
         {
             models.Booking.status: "CONFIRMED",
-            models.Booking.status_updated_at: datetime.now(),
-        }, 
-        synchronize_session=False
+            models.Booking.status_updated_at: datetime.now(IRELAND_TZ).replace(tzinfo=None),
+        },
+        synchronize_session=False,
     )
     db.commit()
+
+    all_group_bookings = (
+        db.query(models.Booking)
+        .filter(models.Booking.grouped_booking_id.in_(grouped_ids))
+        .all()
+    )
+
+    unique_targets: dict[str, models.User] = {}
+    for booking in all_group_bookings:
+        user = booking.user
+        if user and user.discord_id:
+            unique_targets[user.discord_id] = user
+
+    for discord_id, user in unique_targets.items():
+        # Get all bookings for this user in the affected groups
+        user_bookings = [b for b in all_group_bookings if b.user and b.user.discord_id == discord_id]
+        if not user_bookings:
+            continue
+        # Group bookings by device and find overall time range for each device
+        device_ranges = {}
+        for b in user_bookings:
+            device_key = (b.device.deviceType, b.device.deviceName)
+            if device_key not in device_ranges:
+                device_ranges[device_key] = {'start': b.start_time, 'end': b.end_time}
+            else:
+                device_ranges[device_key]['start'] = min(device_ranges[device_key]['start'], b.start_time)
+                device_ranges[device_key]['end'] = max(device_ranges[device_key]['end'], b.end_time)
+        devices_info = []
+        for (device_type, device_name), times in device_ranges.items():
+            start_str = times['start'].strftime("%Y-%m-%d %H:%M")
+            end_str = times['end'].strftime("%Y-%m-%d %H:%M")
+            devices_info.append(
+                f"> Device: **{device_type} - {device_name}**\n"
+                f"> Time Period: {start_str} ~ {end_str}"
+            )
+        devices_str = "\n".join(devices_info)
+        
+        # Check if this is a collaborative booking
+        collab_info = ""
+        if len(all_group_bookings) > 1:
+            collaborator_users = set()
+            for b in all_group_bookings:
+                if b.user and b.user.username:
+                    collaborator_users.add(b.user.username)
+            # Remove current user to show only "other" collaborators
+            if user.username:
+                collaborator_users.discard(user.username)
+            if collaborator_users:
+                collab_str = ", ".join(sorted(collaborator_users))
+                collab_info = f"> **Collaborative booking with:** {collab_str}\n"
+        
+        msg = (
+            f":white_check_mark: <@{discord_id}>, your booking has been **CONFIRMED** by admin.\n"
+            f"{collab_info}{devices_str}"
+        )
+        background_tasks.add_task(send_admin_action_notification, msg, discord_id)
+
     return {"updated": booking_ids}
 
 
 @router.post("/bookings/decline")
-def decline_bookings(payload: dict, request: Request, db: Session = Depends(get_db)):
+def decline_bookings(payload: dict, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     admin_required(request, db)
     booking_ids = payload.get("booking_ids", [])
     if not booking_ids:
         raise HTTPException(status_code=400, detail="booking_ids required")
 
-    db.query(models.Booking).filter(models.Booking.booking_id.in_(booking_ids)).update(
+    bookings = db.query(models.Booking).filter(models.Booking.booking_id.in_(booking_ids)).all()
+    if not bookings:
+        raise HTTPException(status_code=404, detail="No matching bookings found")
+
+    grouped_ids = {booking.grouped_booking_id for booking in bookings}
+
+    db.query(models.Booking).filter(models.Booking.grouped_booking_id.in_(grouped_ids)).update(
         {
-            models.Booking.status: "DECLINED", 
-            models.Booking.status_updated_at: datetime.now(),
-        }, 
-        synchronize_session=False
+            models.Booking.status: "DECLINED",
+            models.Booking.status_updated_at: datetime.now(IRELAND_TZ).replace(tzinfo=None),
+        },
+        synchronize_session=False,
     )
     db.commit()
+
+    all_group_bookings = (
+        db.query(models.Booking)
+        .filter(models.Booking.grouped_booking_id.in_(grouped_ids))
+        .all()
+    )
+
+    unique_targets: dict[str, models.User] = {}
+    for booking in all_group_bookings:
+        user = booking.user
+        if user and user.discord_id:
+            unique_targets[user.discord_id] = user
+
+    for discord_id, user in unique_targets.items():
+        # Get all bookings for this user in the affected groups
+        user_bookings = [b for b in all_group_bookings if b.user and b.user.discord_id == discord_id]
+        if not user_bookings:
+            continue
+        # Group bookings by device and find overall time range for each device
+        device_ranges = {}
+        for b in user_bookings:
+            device_key = (b.device.deviceType, b.device.deviceName)
+            if device_key not in device_ranges:
+                device_ranges[device_key] = {'start': b.start_time, 'end': b.end_time}
+            else:
+                device_ranges[device_key]['start'] = min(device_ranges[device_key]['start'], b.start_time)
+                device_ranges[device_key]['end'] = max(device_ranges[device_key]['end'], b.end_time)
+        devices_info = []
+        for (device_type, device_name), times in device_ranges.items():
+            start_str = times['start'].strftime("%Y-%m-%d %H:%M")
+            end_str = times['end'].strftime("%Y-%m-%d %H:%M")
+            devices_info.append(
+                f"> Device: **{device_type} - {device_name}**\n"
+                f"> Time Period: {start_str} ~ {end_str}"
+            )
+        devices_str = "\n".join(devices_info)
+        
+        # Check if this is a collaborative booking
+        collab_info = ""
+        if len(all_group_bookings) > 1:
+            collaborator_users = set()
+            for b in all_group_bookings:
+                if b.user and b.user.username:
+                    collaborator_users.add(b.user.username)
+            # Remove current user to show only "other" collaborators
+            if user.username:
+                collaborator_users.discard(user.username)
+            if collaborator_users:
+                collab_str = ", ".join(sorted(collaborator_users))
+                collab_info = f"> **Collaborative booking with:** {collab_str}\n"
+        
+        msg = (
+            f":x: <@{discord_id}>, your booking has been **DECLINED** by admin.\n"
+            f"{collab_info}{devices_str}"
+        )
+        background_tasks.add_task(send_admin_action_notification, msg, discord_id)
+
     return {"updated": booking_ids}
+
+
+@router.post("/bookings/return-to-pending")
+def return_bookings_to_pending(payload: dict, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    super_admin_required(request, db)
+    booking_ids = payload.get("booking_ids", [])
+    if not booking_ids:
+        raise HTTPException(status_code=400, detail="booking_ids required")
+
+    bookings = db.query(models.Booking).filter(models.Booking.booking_id.in_(booking_ids)).all()
+    if not bookings:
+        raise HTTPException(status_code=404, detail="No matching bookings found")
+
+    grouped_ids = {booking.grouped_booking_id for booking in bookings}
+
+    db.query(models.Booking).filter(models.Booking.grouped_booking_id.in_(grouped_ids)).update(
+        {
+            models.Booking.status: "PENDING",
+            models.Booking.status_updated_at: datetime.now(IRELAND_TZ).replace(tzinfo=None),
+        },
+        synchronize_session=False,
+    )
+    db.commit()
+
+    all_group_bookings = (
+        db.query(models.Booking)
+        .filter(models.Booking.grouped_booking_id.in_(grouped_ids))
+        .all()
+    )
+
+    unique_targets: dict[str, models.User] = {}
+    for booking in all_group_bookings:
+        user = booking.user
+        if user and user.discord_id:
+            unique_targets[user.discord_id] = user
+
+    for discord_id, user in unique_targets.items():
+        # Get all bookings for this user in the affected groups
+        user_bookings = [b for b in all_group_bookings if b.user and b.user.discord_id == discord_id]
+        if not user_bookings:
+            continue
+        # Group bookings by device and find overall time range for each device
+        device_ranges = {}
+        for b in user_bookings:
+            device_key = (b.device.deviceType, b.device.deviceName)
+            if device_key not in device_ranges:
+                device_ranges[device_key] = {'start': b.start_time, 'end': b.end_time}
+            else:
+                device_ranges[device_key]['start'] = min(device_ranges[device_key]['start'], b.start_time)
+                device_ranges[device_key]['end'] = max(device_ranges[device_key]['end'], b.end_time)
+        devices_info = []
+        for (device_type, device_name), times in device_ranges.items():
+            start_str = times['start'].strftime("%Y-%m-%d %H:%M")
+            end_str = times['end'].strftime("%Y-%m-%d %H:%M")
+            devices_info.append(
+                f"> Device: **{device_type} - {device_name}**\n"
+                f"> Time Period: {start_str} ~ {end_str}"
+            )
+        devices_str = "\n".join(devices_info)
+        
+        # Check if this is a collaborative booking
+        collab_info = ""
+        if len(all_group_bookings) > 1:
+            collaborator_users = set()
+            for b in all_group_bookings:
+                if b.user and b.user.username:
+                    collaborator_users.add(b.user.username)
+            # Remove current user to show only "other" collaborators
+            if user.username:
+                collaborator_users.discard(user.username)
+            if collaborator_users:
+                collab_str = ", ".join(sorted(collaborator_users))
+                collab_info = f"> **Collaborative booking with:** {collab_str}\n"
+        
+        msg = (
+            f":arrows_counterclockwise: <@{discord_id}>, your booking has been **RETURNED TO PENDING** by admin.\n"
+            f"{collab_info}{devices_str}"
+        )
+        background_tasks.add_task(send_admin_action_notification, msg, discord_id)
+
+    return {"updated": booking_ids}
+
 
 # @router.port("/bookings/conflicts/resolve")
 # def resolve_booking_conflicts(payload: dict, request: Request, db: Session = Depends(get_db)):
@@ -695,7 +989,7 @@ def invite_user( payload: schemas.AdminUserInviteRequest, request: Request, db: 
         notes=payload.notes.strip() if payload.notes else None,
         invited_by=inviter_id,
         token=token,
-        expires_at=datetime.now(UTC) + timedelta(days=7),
+        expires_at=datetime.now(IRELAND_TZ) + timedelta(days=7),
     )
     db.add(inv)
     db.commit()

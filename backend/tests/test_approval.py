@@ -6,13 +6,17 @@ from datetime import datetime, timedelta
 from backend.scheduler.models import Booking
 from unittest.mock import patch
 
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
+
 ADMIN_NOTIFY_PATH = "backend.scheduler.routers.admin.send_admin_action_notification"
 
 
 def test_get_pending_bookings(authenticated_admin_client, test_user, test_device, db_session):
     """Test getting all pending bookings"""
     # Create pending booking
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     booking = Booking(
         device_id=test_device.id,
         user_id=test_user.id,
@@ -99,7 +103,7 @@ def test_approve_booking_requires_admin(authenticated_client, test_booking):
 def test_get_conflicting_bookings(authenticated_admin_client, test_user, test_device, db_session):
     """Test getting conflicting bookings"""
     # Create two conflicting bookings
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     booking1 = Booking(
@@ -129,7 +133,7 @@ def test_get_conflicting_bookings(authenticated_admin_client, test_user, test_de
 
 def test_approve_conflicting_booking(authenticated_admin_client, test_user, test_device, db_session):
     """Test that admin can approve conflicting bookings"""
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     conflicting_booking = Booking(
         device_id=test_device.id,
         user_id=test_user.id,

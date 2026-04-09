@@ -12,31 +12,57 @@ import { canEditBookings } from '../utils/permissions';
 
 
 // Reusable component to ensure both sides of the modal are identical
-function BookingSummary({ booking }) {
+function BookingSummary({ booking, groupInfo }) {
     if (!booking) return null;
 
+    const isGroup = groupInfo?.is_group_booking;
+    const groupStart = groupInfo?.devices?.reduce((min, dev) => {
+        const current = new Date(dev.start_time);
+        return min ? (current < min ? current : min) : current;
+    }, null);
+    const groupEnd = groupInfo?.devices?.reduce((max, dev) => {
+        const current = new Date(dev.end_time);
+        return max ? (current > max ? current : max) : current;
+    }, null);
+
     return (
-        <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4 space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-                <span className="text-gray-600 dark:text-gray-400">User</span>
-                <span className="text-gray-900 dark:text-gray-100">{booking.user.username}</span>
+        <div className="bg-gray-50 dark:bg-gray-900/40 rounded-3xl p-6 space-y-4 text-sm shadow-sm border border-gray-200 dark:border-gray-800">
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                    <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold">User</div>
+                    <div className="mt-1 text-gray-900 dark:text-gray-100 font-medium">{booking.user.username}</div>
+                </div>
+                {isGroup && (
+                    <div>
+                        <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold">Collaborators</div>
+                        <div className="mt-1 text-gray-900 dark:text-gray-100 space-y-1">
+                            {groupInfo.collaborators.length > 0
+                                ? groupInfo.collaborators.map((collab, idx) => (
+                                    <div key={idx}>{collab.username}</div>
+                                ))
+                                : <div className="text-gray-500 dark:text-gray-500">None</div>
+                            }
+                        </div>
+                    </div>
+                )}
+                <div>
+                    <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold">Time Frame</div>
+                    <div className="mt-1 text-gray-900 dark:text-gray-100 font-medium">
+                        {groupStart && groupEnd
+                            ? `${groupStart.toLocaleString()} → ${groupEnd.toLocaleString()}`
+                            : `${formatDateTime(booking.start_time)} → ${formatDateTime(booking.end_time)}`}
+                    </div>
+                </div>
+                <div>
+                    <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold">Status</div>
+                    <div className="mt-1 text-gray-900 dark:text-gray-100 font-medium">{booking.status}</div>
+                </div>
             </div>
-            <div className="flex items-center justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Device</span>
-                <span className="text-gray-900 dark:text-gray-100">{booking.device.name}</span>
-            </div>
-            <div className="flex items-center justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Start</span>
-                <span className="text-gray-900 dark:text-gray-100">{formatDateTime(booking.start_time)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-                <span className="text-gray-600 dark:text-gray-400">Status</span>
-                <span className="text-gray-900 dark:text-gray-100">{booking.status}</span>
-            </div>
-            <div className="flex items-center justify-between">
-                <div className="text-gray-600 dark:text-gray-400">Comment</div>
-                <div className="mt-1 text-gray-900 dark:text-gray-100 text-sm">
-                    {booking.comment || '-'}
+
+            <div className="grid grid-cols-1 gap-4">
+                <div>
+                    <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold">Comment</div>
+                    <div className="mt-1 text-gray-900 dark:text-gray-100">{booking.comment || '-'}</div>
                 </div>
             </div>
         </div>
@@ -44,7 +70,7 @@ function BookingSummary({ booking }) {
 }
 
 // Displays details of each booking 
-function BookingDetailPanel({ booking, bookingId, isLoading, isError }) {
+function BookingDetailPanel({ booking, bookingId, groupInfo, isLoading, isError }) {
     if (isLoading) {
         return (
         <div className="flex items-center justify-center h-full py-8 text-sm text-gray-500 dark:text-gray-400">
@@ -70,13 +96,81 @@ function BookingDetailPanel({ booking, bookingId, isLoading, isError }) {
     }
 
     return (
-        <div className="p-4 space-y-4 h-full overflow-y-auto">
+        <div className="p-4 space-y-6 h-full overflow-y-auto">
             <div>
                 <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold mb-2">
-                    Booking #{bookingId}
+                    {groupInfo?.is_group_booking ? `Group ${booking.grouped_booking_id}` : `Booking #${bookingId}`}
                 </div>
-                <BookingSummary booking={booking} />
+                <BookingSummary booking={booking} groupInfo={groupInfo} />
             </div>
+
+            {groupInfo?.devices?.length > 0 && (
+                <div className="space-y-3">
+                    <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold">Device in group</div>
+                    <div className="space-y-3">
+                        {groupInfo.devices.map((dev, idx) => (
+                            <div key={idx} className="rounded-3xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 p-4 shadow-sm">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div>
+                                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{dev.name}</div>
+                                        <div className="text-xs text-gray-500 dark:text-gray-400">{dev.type}</div>
+                                    </div>
+                                    <span className="inline-flex items-center rounded-full bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 px-3 py-1 text-[11px] font-semibold">CONFLICTING</span>
+                                </div>
+                                <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                                    {new Date(dev.start_time).toLocaleString()} → {new Date(dev.end_time).toLocaleString()}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* {groupInfo?.group_bookings?.length > 0 && (
+                <div className="space-y-3">
+                    <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 font-semibold">Individual bookings</div>
+                    <div className="space-y-2">
+                        {groupInfo.group_bookings.map((gb) => (
+                            <div key={gb.booking_id} className="rounded-3xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 p-4">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Booking #{gb.booking_id}</div>
+                                        <div className="text-xs text-gray-500 dark:text-gray-400">{gb.user.username}</div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            disabled
+                                            className="px-3 py-1 text-[11px] font-semibold rounded-full border border-gray-300 text-gray-500 bg-white dark:bg-gray-950 dark:border-gray-800 dark:text-gray-400"
+                                        >
+                                            Approve
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled
+                                            className="px-3 py-1 text-[11px] font-semibold rounded-full border border-gray-300 text-gray-500 bg-white dark:bg-gray-950 dark:border-gray-800 dark:text-gray-400"
+                                        >
+                                            Decline
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                    {gb.device.name} ({gb.device.type})
+                                </div>
+                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    {new Date(gb.start_time).toLocaleString()} → {new Date(gb.end_time).toLocaleString()}
+                                </div>
+                                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                    Status: {gb.status}
+                                </div>
+                                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                    Comment: {gb.comment || '-'}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )} */}
         </div>
     );
 }
@@ -99,10 +193,12 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
     });
 
     const approveMutation1 = useMutation({
-      mutationFn: () => approveBookings({ booking_ids: [bookingId1] }),
+      mutationFn: async () => {
+        await approveBookings({ booking_ids: [bookingId1] });
+        await declineBookings({ booking_ids: [bookingId2] });
+      },
       onSuccess: async () => {
-        declineMutation2.mutate();
-        toast.success('Booking approved.');
+        toast.success('Conflict resolved: Group 1 approved, Group 2 declined.');
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['admin-bookings'] }),
           queryClient.invalidateQueries({ queryKey: ['conflict-resolution-one', bookingId1] }),
@@ -110,14 +206,16 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
         ]);
         onClosed?.();
       },
-      onError: (err) => toast.error(err?.message || 'Unable to approve booking.'),
+      onError: (err) => toast.error(err?.message || 'Unable to resolve conflict.'),
     });
 
     const declineMutation1 = useMutation({
-      mutationFn: () => declineBookings({ booking_ids: [bookingId1] }),
+      mutationFn: async () => {
+        await declineBookings({ booking_ids: [bookingId1] });
+        await approveBookings({ booking_ids: [bookingId2] });
+      },
       onSuccess: async () => {
-        approveMutation2.mutate();
-        toast.success('Booking declined.');
+        toast.success('Conflict resolved: Group 1 declined, Group 2 approved.');
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['admin-bookings'] }),
           queryClient.invalidateQueries({ queryKey: ['conflict-resolution-one', bookingId1] }),
@@ -125,14 +223,16 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
         ]);
         onClosed?.();
       },
-      onError: (err) => toast.error(err?.message || 'Unable to decline booking.'),
+      onError: (err) => toast.error(err?.message || 'Unable to resolve conflict.'),
     });
 
     const approveMutation2 = useMutation({
-      mutationFn: () => approveBookings({ booking_ids: [bookingId2] }),
+      mutationFn: async () => {
+        await approveBookings({ booking_ids: [bookingId2] });
+        await declineBookings({ booking_ids: [bookingId1] });
+      },
       onSuccess: async () => {
-        declineMutation1.mutate();
-        toast.success('Booking approved.');
+        toast.success('Conflict resolved: Group 2 approved, Group 1 declined.');
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['admin-bookings'] }),
           queryClient.invalidateQueries({ queryKey: ['conflict-resolution-one', bookingId1] }),
@@ -140,14 +240,16 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
         ]);
         onClosed?.();
       },
-      onError: (err) => toast.error(err?.message || 'Unable to approve booking.'),
+      onError: (err) => toast.error(err?.message || 'Unable to resolve conflict.'),
     });
 
     const declineMutation2 = useMutation({
-      mutationFn: () => declineBookings({ booking_ids: [bookingId2] }),
+      mutationFn: async () => {
+        await declineBookings({ booking_ids: [bookingId2] });
+        await approveBookings({ booking_ids: [bookingId1] });
+      },
       onSuccess: async () => {
-        approveMutation1.mutate();
-        toast.success('Booking declined.');
+        toast.success('Conflict resolved: Group 2 declined, Group 1 approved.');
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: ['admin-bookings'] }),
           queryClient.invalidateQueries({ queryKey: ['conflict-resolution-one', bookingId1] }),
@@ -155,7 +257,7 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
         ]);
         onClosed?.();
       },
-      onError: (err) => toast.error(err?.message || 'Unable to decline booking.'),
+      onError: (err) => toast.error(err?.message || 'Unable to resolve conflict.'),
     });
 
     useEffect(() => {
@@ -172,7 +274,9 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
     if(!open) return null;
 
     const booking1 = bookingQuery1.data?.booking;
+    const groupInfo1 = bookingQuery1.data?.group_info;
     const booking2 = bookingQuery2.data?.booking;
+    const groupInfo2 = bookingQuery2.data?.group_info;
 
     return(
         <div className="fixed inset-0 z-[100] flex justify-end">
@@ -189,7 +293,10 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
                             Conflict Resolution
                         </div>
                         <div className="text-lg font-semibold text-gray-900 dark:text-white">
-                            Booking #{bookingId1} vs #{bookingId2}
+                            {groupInfo1?.is_group_booking || groupInfo2?.is_group_booking 
+                                ? `Group ${booking1?.grouped_booking_id || bookingId1} vs Group ${booking2?.grouped_booking_id || bookingId2}`
+                                : `Booking #${bookingId1} vs Booking #${bookingId2}`
+                            }
                         </div>
                     </div>
                     <button
@@ -207,6 +314,7 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
                     <BookingDetailPanel
                         booking={booking1}
                         bookingId={bookingId1}
+                        groupInfo={groupInfo1}
                         isLoading={bookingQuery1.status === 'pending'}
                         isError={bookingQuery1.status === 'error'}
                     />
@@ -215,18 +323,18 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
                             <button
                                 type="button"
                                 onClick={() => approveMutation1.mutate()}
-                                disabled={approveMutation1.isPending  || booking1.status !== "CONFLICTING"}
+                                disabled={approveMutation1.isPending}
                                 className="w-full px-4 py-2 text-sm font-semibold rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
                             >
-                                Approve Booking {bookingId1}
+                                Approve {groupInfo1?.is_group_booking ? 'Group' : 'Booking'} {groupInfo1?.is_group_booking ? booking1.grouped_booking_id : bookingId1}
                             </button>
                             <button
                                 type="button"
                                 onClick={() => declineMutation1.mutate()}
-                                disabled={declineMutation1.isPending || booking1.status !== "CONFLICTING"}
+                                disabled={declineMutation1.isPending}
                                 className="w-full px-4 py-2 text-sm font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
                             >
-                                Decline Booking {bookingId1}
+                                Decline {groupInfo1?.is_group_booking ? 'Group' : 'Booking'} {groupInfo1?.is_group_booking ? booking1.grouped_booking_id : bookingId1}
                             </button>
                         </div>
                     )}
@@ -236,6 +344,7 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
                     <BookingDetailPanel
                         booking={booking2}
                         bookingId={bookingId2}
+                        groupInfo={groupInfo2}
                         isLoading={bookingQuery2.status === 'pending'}
                         isError={bookingQuery2.status === 'error'}
                     />
@@ -244,18 +353,18 @@ export default function ConflictResolutionModal( { bookingId1, bookingId2, open,
                             <button
                                 type="button"
                                 onClick={() => approveMutation2.mutate()}
-                                disabled={approveMutation2.isPending || booking2.status !== "CONFLICTING"}
+                                disabled={approveMutation2.isPending}
                                 className="w-full px-4 py-2 text-sm font-semibold rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
                             >
-                                Approve Booking {bookingId2}
+                                Approve {groupInfo2?.is_group_booking ? 'Group' : 'Booking'} {groupInfo2?.is_group_booking ? booking2.grouped_booking_id : bookingId2}
                             </button>
                             <button
                                 type="button"
                                 onClick={() => declineMutation2.mutate()}
-                                disabled={declineMutation2.isPending || booking2.status !== "CONFLICTING"}
+                                disabled={declineMutation2.isPending}
                                 className="w-full px-4 py-2 text-sm font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
                             >
-                                Decline Booking {bookingId2}
+                                Decline {groupInfo2?.is_group_booking ? 'Group' : 'Booking'} {groupInfo2?.is_group_booking ? booking2.grouped_booking_id : bookingId2}
                             </button>
                         </div>
                     )}

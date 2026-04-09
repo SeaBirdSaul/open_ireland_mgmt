@@ -29,6 +29,13 @@ services:
       - PASSWORD_RESET_TTL_MINUTES=45
       - PASSWORD_RESET_RATE_LIMIT_PER_HOUR=5
       - EMAIL_VERIFY_TTL_MINUTES=60
+      # Discord Notification Configuration (choose one mode):
+      # === WEBHOOK MODE (default, no dependencies) ===
+      # - BOOKING_WEBHOOK=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_TOKEN
+      # - ADMIN_WEBHOOK=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_TOKEN
+      # === BOT MODE (requires discord.py and bot token) ===
+      # - DISCORD_BOT_TOKEN=YOU_TOKEN_HERE
+      # - DISCORD_USE_DM=true  # Set to 'true' to send admin notifications as DMs instead of channel messages
     volumes:
       - ./backend:/app/backend
     ports:

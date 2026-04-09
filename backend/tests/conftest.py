@@ -42,6 +42,9 @@ from backend.core.hash import hash_password
 # metadata is registered before Base.metadata.create_all() in db_session fixture
 from backend.inventory import models as inventory_models  # noqa: F401
 from backend.inventory.router import get_db as inventory_get_db
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 
 # Safety check: Ensure we're not accidentally using production database
@@ -185,7 +188,7 @@ def test_device(db_session):
 @pytest.fixture
 def test_booking(db_session, test_user, test_device):
     """Create a test booking"""
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     booking = Booking(

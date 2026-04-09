@@ -66,7 +66,7 @@ class PasswordResetRequest(BaseModel):
         return email
 
 class PasswordResetConfirm(BaseModel):
-    token: str = Field(min_length=20, max_length=512)
+    token: str = Field(min_length=6, max_length=512)
     new_password: str = Field(min_length=64, max_length=64) # Pre hased in SHA256 hex from fronted
     new_password2: str = Field(min_length=64, max_length=64) # Pre hased in SHA256 hex from fronted
 
@@ -83,7 +83,7 @@ class PasswordResetConfirm(BaseModel):
         return v
 
 class EmailVerificationConfirm(BaseModel):
-    token: str = Field(min_length=20, max_length=512)
+    token: str = Field(min_length=6, max_length=512)
 
 class EmailVerificationResend(BaseModel):
     email: str = Field(min_length=3, max_length=200)

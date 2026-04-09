@@ -1,9 +1,13 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta
 from typing import Iterable
 from sqlalchemy.orm import Session, joinedload
+import pytz
 from backend.scheduler import models
+
+# Timezone for Ireland
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 ACTIVE_BOOKING_STATUSES = {"PENDING", "CONFIRMED", "CONFLICTING"}
 TERMINAL_BOOKING_STATUSES = {"DECLINED", "CANCELLED", "EXPIRED"}
@@ -67,7 +71,7 @@ def is_maintenance_active_at(
     maintenance_end: str | None,
     at: datetime | None = None,
 ) -> bool:
-    check_at = at or datetime.now(UTC).replace(tzinfo=None)
+    check_at = at or datetime.now(IRELAND_TZ).replace(tzinfo=None)
     window_start, window_end = maintenance_window_from_strings(maintenance_start, maintenance_end)
 
     if not window_start or not window_end or window_end <= window_start:
@@ -80,7 +84,7 @@ def has_maintenance_ended(
     maintenance_end: str | None,
     at: datetime | None = None,
 ) -> bool:
-    check_at = at or datetime.now(UTC).replace(tzinfo=None)
+    check_at = at or datetime.now(IRELAND_TZ).replace(tzinfo=None)
     _, window_end = maintenance_window_from_strings(maintenance_start, maintenance_end)
     if not window_end:
         return False
@@ -113,7 +117,7 @@ def should_enter_maintenance(device: models.Device, *, at: datetime | None = Non
     return device.status != "Maintenance" and is_maintenance_active_at(device, at=at)
 
 def should_exit_maintenance(device: models.Device, *, at: datetime | None = None) -> bool:
-    at = (at or datetime.now(UTC)).replace(tzinfo=None)
+    at = (at or datetime.now(IRELAND_TZ)).replace(tzinfo=None)
     _, window_end = maintenance_window_from_strings(device.maintenance_start, device.maintenance_end)
     return device.status == "Maintenance" and window_end is not None and at >= window_end
 
@@ -185,7 +189,7 @@ def apply_maintenance_to_devices(
             
             booking.status = decline_status
             booking.comment = MAINTENANCE_DECLINE_COMMENT
-            booking.status_updated_at = datetime.now(UTC).replace(tzinfo=None)
+            booking.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
             affected_bookings[booking.booking_id] = booking
 
             user = booking.user
@@ -209,7 +213,7 @@ def apply_maintenance_to_devices(
     )
 
 def sync_scheduled_maintenance_statuses(db: Session, *, at: datetime | None = None, default_return_status: str = "Available") -> MaintenanceImpactResult:
-    check_at = (at or datetime.now(UTC)).replace(tzinfo=None)
+    check_at = (at or datetime.now(IRELAND_TZ)).replace(tzinfo=None)
     
     rows = (
         db.query(models.Device)

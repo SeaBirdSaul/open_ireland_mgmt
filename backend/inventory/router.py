@@ -12,10 +12,14 @@ from typing import List, Optional
 from datetime import datetime
 import shutil
 import os
+import pytz
 
 from backend.core.deps import get_db
 from backend.inventory import models, schemas
 from backend.inventory.models import InventoryDevice, InventoryDeviceTag
+
+# Timezone for Ireland
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 router = APIRouter()
 
@@ -1134,7 +1138,7 @@ def upload_attachment(
 
     # Generate safe filename
     # Prefix with device_id to avoid collisions or grouping
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(IRELAND_TZ).strftime("%Y%m%d_%H%M%S")
     safe_filename = f"{device_id}_{timestamp}_{file.filename}"
     file_path = os.path.join(UPLOAD_DIR, safe_filename)
     

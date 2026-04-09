@@ -6,6 +6,9 @@ from datetime import datetime, timedelta
 from backend.scheduler.models import User, Device, Booking
 from backend.core.hash import hash_password
 from unittest.mock import patch
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 
 @pytest.mark.integration
@@ -23,7 +26,7 @@ def test_complete_booking_workflow(authenticated_client, test_user, db_session):
     db_session.commit()
     
     # Create booking
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     with patch('backend.main.send_booking_created_notification'):
@@ -172,7 +175,7 @@ def test_booking_conflict_detection_workflow(authenticated_client, test_user, db
     db_session.commit()
     
     # Create first booking
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     booking1 = Booking(

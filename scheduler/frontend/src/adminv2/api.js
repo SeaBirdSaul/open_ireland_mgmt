@@ -91,6 +91,13 @@ export function declineBookings(payload) {
   });
 }
 
+export function returnBookingsToPending(payload) {
+  return adminRequest('/admin/v2/bookings/return-to-pending', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function resolveConflicts(payload) {
   return adminRequest('/admin/v2/bookings/conflicts/resolve', {
     method: 'POST',

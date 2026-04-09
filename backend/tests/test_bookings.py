@@ -5,11 +5,14 @@ import pytest
 from datetime import datetime, timedelta
 from backend.scheduler.models import Booking, Device
 from unittest.mock import patch, MagicMock
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 
 def test_create_single_booking(authenticated_client, test_user, test_device):
     """Test creating a single booking"""
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     with patch('backend.main.send_booking_created_notification'):
@@ -56,7 +59,7 @@ def test_create_multi_device_booking(authenticated_client, test_user, db_session
     db_session.add_all([device1, device2])
     db_session.commit()
     
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=3)
     
     with patch('backend.main.send_booking_created_notification'):
@@ -91,7 +94,7 @@ def test_create_multi_device_booking(authenticated_client, test_user, db_session
 
 def test_create_booking_nonexistent_user(authenticated_client, test_device):
     """Test creating booking with non-existent user"""
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     response = authenticated_client.post(
@@ -195,8 +198,8 @@ def test_get_bookings_for_week_invalid_date(authenticated_client):
 def test_booking_auto_expire(authenticated_client, test_user, test_booking, db_session):
     """Test that expired bookings are automatically marked as expired"""
     # Set booking to past
-    test_booking.start_time = datetime.now() - timedelta(days=2)
-    test_booking.end_time = datetime.now() - timedelta(days=1)
+    test_booking.start_time = datetime.now(IRELAND_TZ) - timedelta(days=2)
+    test_booking.end_time = datetime.now(IRELAND_TZ) - timedelta(days=1)
     test_booking.status = "CONFIRMED"
     db_session.commit()
     
@@ -212,7 +215,7 @@ def test_booking_auto_expire(authenticated_client, test_user, test_booking, db_s
 def test_cancel_booking_resolves_conflict(authenticated_client, test_user, test_device, db_session):
     """Test that canceling a booking resolves conflicts"""
     # Create two overlapping bookings
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     booking1 = Booking(

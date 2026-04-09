@@ -51,6 +51,7 @@ function ClientV2Inner() {
   const [resetTokenFromUrl, setResetTokenFromUrl] = useState('');
   const [verifyTokenFromUrl, setVerifyTokenFromUrl] = useState('');
   const [verificationEmail, setVerificationEmail] = useState('');
+  const [resetEmail, setResetEmail] = useState('');
   const [particlesEnabled, setParticlesEnabled] = useState(() => {
     const saved = localStorage.getItem('particlesEnabled');
     return saved !== null ? saved === 'true' : false; // Default to false
@@ -508,15 +509,13 @@ function ClientV2Inner() {
         }
 
         const data = await res.json().catch(() => ({}));
-        if(data?.requires_email_verification) {
-          toast.success(data?.message || 'Registration successful. Please verify your email.');
-          setAuthModal('verifyResend');
-          setVerificationEmail(email || '');
-          return;
-        }
-        toast.success('Account created successfully. Please log in.');
-        setAuthModal(null);
-        await safeRefreshAuth();
+        toast.success(
+          data?.message || 'Registration successful. Please enter the verification code sent via Discord DM or email.'
+        );
+        setVerificationEmail(email || '');
+        setAuthModal('verifyConfirm');
+        console.log('Registration successful, opening verifyConfirm modal');
+        return;
       } catch (err) {
         toast.error(err.message || 'Unable to register at this time.');
       } finally {
@@ -547,8 +546,11 @@ function ClientV2Inner() {
           throw new Error(errData?.detail || 'Unable to request password reset.');
         }
 
-        toast.success('If that account exists, a reset link has been sent.')
-        setAuthModal('forgotSent');
+        toast.success(
+          'If that account exists, a password reset code has been sent via Discord DM if available, otherwise via email. Enter it in the popup.'
+        );
+        setResetEmail(email.trim());
+        setAuthModal('forgotConfirm');
       } catch (err) {
         toast.error(err.message || 'Unable to request password reset.');
       } finally {
@@ -651,19 +653,21 @@ function ClientV2Inner() {
       const res = await fetch(`${API_BASE_URL}/auth/email-verify/resend`, { 
         method: 'POST',
         credentials: 'include',
-        header: {
-          'Content-Type': 'application/json' ,
+        headers: {
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email: email.trim() }),
       });
 
       if (!res.ok && res.status !== 202) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData?.detail || 'Unable to resend verification email.');
+        throw new Error(errData?.detail || 'Unable to resend verification code.');
       }
 
       const data = await res.json().catch(() => ({}));
-      toast.success(data?.message || 'Verification email sent.');
+      toast.success(
+        data?.message || 'Verification code sent via Discord DM if available, otherwise email.'
+      );
       setAuthModal('verifyConfirm');
     } catch (err) {
       toast.error(err.message || 'Unable to resend verification email.');
@@ -995,7 +999,7 @@ function ClientV2Inner() {
           onVerifyResend={handleEmailVerifyResend}
           initialResetToken={resetTokenFromUrl}
           initialVerifyToken={verifyTokenFromUrl}
-          initialEmail={verificationEmail}
+          initialEmail={authModal === 'forgotConfirm' ? resetEmail : verificationEmail}
         />
       )}
     </>
@@ -1025,23 +1029,19 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
     setShowPassword(false);
     setShowConfirmPassword(false);
     setDiscordId('');
+    setResetToken('');
+    setVerifyToken('');
 
-    if (mode === 'forgotConfirm'){
+    if (mode === 'forgotConfirm') {
       setResetToken(initialResetToken || '');
-    } else {
-      setResetToken('');
     }
 
-    if (mode === 'verifyResend') {
+    if (mode === 'verifyResend' || mode === 'forgotConfirm') {
       setEmail(initialEmail || '');
-    } else {
-      setEmail('');
     }
 
     if (mode === 'verifyConfirm') {
       setVerifyToken(initialVerifyToken || '');
-    } else {
-      setVerifyToken('');
     }
   }, [mode, initialEmail, initialResetToken, initialVerifyToken]);
 
@@ -1104,9 +1104,9 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
     submitting ? 'Please wait...'
     : mode === 'login' ? 'Sign In'
     : mode === 'register' ? 'Create Account'
-    : mode === 'forgotRequest' ? 'Send reset email'
+    : mode === 'forgotRequest' ? 'Send reset code'
     : mode === 'forgotConfirm' ? 'Reset Password'
-    : mode === 'verifyResend' ? 'Resend verification email'
+    : mode === 'verifyResend' ? 'Resend verification code'
     : 'Verify Email';
 
   const isRegister = mode === 'register';
@@ -1137,6 +1137,13 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">Email</label>
               <input id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2" placeholder="you@example.com" required />
+            </div>
+          )}
+
+          {isForgotConfirm && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">Email</label>
+              <input id="auth-email" type="email" value={email} disabled className="w-full glass-input rounded-md px-3 py-2 text-sm bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700" placeholder="you@example.com" />
             </div>
           )}
 
@@ -1172,16 +1179,24 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
             </div>
           )}
 
-          {/* {isForgotConfirm && (
+          {isForgotConfirm && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-reset-token">Reset Token</label>
-              <input id="auth-reset-token" type="text" value={resetToken} onChange={(e) => setResetToken(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm" placeholder="Paste token from email" required />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-reset-token">Password Reset Code</label>
+              <input
+                id="auth-reset-token"
+                type="text"
+                value={resetToken}
+                onChange={(e) => setResetToken(e.target.value)}
+                className="w-full glass-input rounded-md px-3 py-2 text-sm"
+                placeholder="Enter code from Discord DM or email"
+                required
+              />
             </div>
-          )} */}
+          )}
 
           {isForgotSent && (
             <div className="text-sm text-gray-700 dark:text-gray-300">
-              If that account exists, we sent a password reset link. Please check your email inbox and spam folder.
+              If that account exists, a password reset code has been sent via Discord DM if available, otherwise via email. Check your inbox and spam folder.
             </div>
           )}
 
@@ -1194,7 +1209,7 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
                 value={verifyToken}
                 onChange={(e) => setVerifyToken(e.target.value)}
                 className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
-                placeholder='Paste token from email'
+                placeholder='Enter code from Discord DM or email'
                 required
               />
             </div>

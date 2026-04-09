@@ -3,7 +3,9 @@ Admin router for user registration, login, device management, and booking approv
 Includes admin authentication and session management.
 '''
 import os
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
+import pytz
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 # Phase U2: Import InventoryDevice as Device for unified device management
@@ -16,6 +18,9 @@ from backend.core.discord_utils import send_admin_action_notification
 
 from fastapi.responses import JSONResponse
 from backend.scheduler.services.sessions import create_user_session, get_user_from_session_cookie, revoke_session_by_cookie
+
+# Timezone for Ireland
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -145,7 +150,115 @@ def super_admin_required(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Account is inactive")
     if (user.role or "").lower() != "super admin":
         raise HTTPException(status_code=403, detail="Super admin privileges required")
-    
+
+
+def _get_group_discord_targets(db: Session, grouped_booking_id: str) -> set[str]:
+    bookings = (
+        db.query(models.Booking)
+        .filter(models.Booking.grouped_booking_id == grouped_booking_id)
+        .all()
+    )
+    target_ids = set()
+    for booking in bookings:
+        if booking.user and booking.user.discord_id:
+            target_ids.add(booking.user.discord_id)
+    return target_ids
+
+
+def _build_booking_status_message(db: Session, grouped_booking_id: str, status: str, discord_id: str) -> str:
+    bookings = (
+        db.query(models.Booking)
+        .join(models.User)
+        .join(models.Device)
+        .filter(
+            models.Booking.grouped_booking_id == grouped_booking_id,
+            models.User.discord_id == discord_id
+        )
+        .all()
+    )
+    if not bookings:
+        return ""
+
+    # Group bookings by device and find overall time range for each device
+    device_ranges = {}
+    for b in bookings:
+        device_key = (b.device.deviceType, b.device.deviceName)
+        if device_key not in device_ranges:
+            device_ranges[device_key] = {'start': b.start_time, 'end': b.end_time}
+        else:
+            device_ranges[device_key]['start'] = min(device_ranges[device_key]['start'], b.start_time)
+            device_ranges[device_key]['end'] = max(device_ranges[device_key]['end'], b.end_time)
+
+    devices_info = []
+    for (device_type, device_name), times in device_ranges.items():
+        start_str = times['start'].strftime("%Y-%m-%d %H:%M")
+        end_str = times['end'].strftime("%Y-%m-%d %H:%M")
+        devices_info.append(
+            f"> Device: **{device_type} - {device_name}**\n"
+            f"> Time Period: {start_str} ~ {end_str}"
+        )
+    devices_str = "\n".join(devices_info)
+
+    # Check if this is a collaborative booking and gather collaborator info
+    collab_info = ""
+    all_group_bookings = (
+        db.query(models.Booking)
+        .filter(models.Booking.grouped_booking_id == grouped_booking_id)
+        .all()
+    )
+    if len(all_group_bookings) > 1:
+        # This is a collaborative booking - gather all usernames in the group
+        collaborator_users = set()
+        for b in all_group_bookings:
+            if b.user and b.user.username:
+                collaborator_users.add(b.user.username)
+        # Remove the current user from the list to show only "other" collaborators
+        current_user = next((b.user.username for b in all_group_bookings if b.user and b.user.discord_id == discord_id), None)
+        if current_user:
+            collaborator_users.discard(current_user)
+        
+        if collaborator_users:
+            collab_str = ", ".join(sorted(collaborator_users))
+            collab_info = f"> **Collaborative booking with:** {collab_str}\n"
+
+    if status.upper() == "CONFIRMED":
+        return (
+            f":white_check_mark: <@{discord_id}>, your booking has been **CONFIRMED** by admin.\n"
+            f"{collab_info}{devices_str}"
+        )
+    elif status.upper() == "REJECTED":
+        return (
+            f":x: <@{discord_id}>, your booking has been **REJECTED** by admin.\n"
+            f"{collab_info}{devices_str}"
+        )
+    elif status.upper() == "DECLINED":
+        return (
+            f":x: <@{discord_id}>, your booking has been **DECLINED** by admin.\n"
+            f"{collab_info}{devices_str}"
+        )
+    else:
+        return (
+            f":information_source: <@{discord_id}>, your booking status has been updated to **{status.upper()}**.\n"
+            f"{collab_info}{devices_str}"
+        )
+
+
+def _notify_group_booking_status(
+    db: Session,
+    booking: models.Booking,
+    status: str,
+    background_tasks: BackgroundTasks,
+) -> None:
+    target_discord_ids = _get_group_discord_targets(db, booking.grouped_booking_id)
+    if not target_discord_ids:
+        return
+
+    for discord_id in target_discord_ids:
+        message = _build_booking_status_message(db, booking.grouped_booking_id, status, discord_id)
+        if message:
+            background_tasks.add_task(send_admin_action_notification, message, discord_id)
+
+
 @router.get("/checkAdminSession")
 def get_session(request: Request, db: Session = Depends(get_db)):
 
@@ -362,7 +475,7 @@ async def update_booking_status(
     db: Session = Depends(get_db),
     auth: None = Depends(admin_required)
 ):
-    valid_statuses = ["CONFIRMED", "REJECTED"]
+    valid_statuses = ["PENDING", "CONFIRMED", "REJECTED", "CANCELLED"]
     if status_update.status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {', '.join(valid_statuses)}")
     
@@ -370,32 +483,23 @@ async def update_booking_status(
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
 
-    booking.status = status_update.status
+    db.query(models.Booking).filter(
+        models.Booking.grouped_booking_id == booking.grouped_booking_id
+    ).update(
+        {
+            models.Booking.status: status_update.status,
+            models.Booking.status_updated_at: datetime.now(IRELAND_TZ).replace(tzinfo=None),
+        },
+        synchronize_session=False,
+    )
     db.commit()
 
-    user    = db.query(models.User).get(booking.user_id)
-    device = booking.device
-    device_type = booking.device.deviceType
-    device_name = booking.device.deviceName
-    device_ip = device.ip_address
-    start_str = booking.start_time.strftime("%Y-%m-%d %H:%M")
-    end_str   = booking.end_time.strftime("%Y-%m-%d %H:%M")
-
-    if status_update.status == "CONFIRMED":
-        msg = (
-            f":white_check_mark: <@{user.discord_id}>, your booking has been **CONFIRMED** by admin.\n"
-            f"> Device: **{device_type} - {device_name}**\n"
-            f"> Time Period: {start_str} ~ {end_str}"
-        )
-    else:
-        msg = (
-            f":x: <@{user.discord_id}>, your booking has been **REJECTED** by admin.\n"
-            f"> Device: **{device_type} - {device_name}**\n"
-            f"> Time Period: {start_str} ~ {end_str}\n"
-        )
-    background_tasks.add_task(send_admin_action_notification, msg, user.discord_id)
-
-    return {"message": "Booking status updated successfully"}
+    # Check if the group has collaborators (more than 1 booking)
+    booking_count = db.query(models.Booking).filter(
+        models.Booking.grouped_booking_id == booking.grouped_booking_id
+    ).count()
+    if status_update.status in ["CONFIRMED", "REJECTED"] or booking_count > 1:
+        _notify_group_booking_status(db, booking, status_update.status, background_tasks)
 
 
 # ================== Show all current bookings ==================

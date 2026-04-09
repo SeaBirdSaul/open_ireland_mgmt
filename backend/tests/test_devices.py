@@ -3,6 +3,9 @@ Tests for device management endpoints (admin only)
 """
 import pytest
 from backend.inventory.models import DeviceType, InventoryDevice
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 
 def _ensure_device_type(db_session, name):
@@ -74,7 +77,7 @@ def test_add_device(authenticated_admin_client, db_session):
 def test_add_device_with_maintenance(authenticated_admin_client, db_session):
     """Test adding device with maintenance period"""
     from datetime import datetime, timedelta
-    tomorrow = datetime.now() + timedelta(days=1)
+    tomorrow = datetime.now(IRELAND_TZ) + timedelta(days=1)
 
     _ensure_device_type(db_session, "Switch")
     

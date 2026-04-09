@@ -51,6 +51,10 @@ from datetime import datetime, timezone
 from datetime import timedelta
 import uuid
 from zoneinfo import ZoneInfo
+import pytz
+
+# Timezone for Ireland
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 from typing import List, Optional, Iterable, Any
 
@@ -59,8 +63,13 @@ from backend.scheduler.routers.adminV2 import router as admin_v2_router
 from backend.scheduler.routers.admin_debug import router as admin_debug_router
 from backend.scheduler.routers.control_panel import router as control_panel_router
 # from backend.scheduler.services.invitations import router as invitations_router
-from backend.core.discord_utils import send_booking_created_notification, send_admin_action_notification
-from backend.scheduler.services.auth_tokens import generate_reset_token, hash_token, token_ttl_minutes
+from backend.core.discord_utils import (
+    initialize_discord_bot,
+    send_booking_created_notification,
+    send_admin_action_notification,
+    send_direct_discord_dm,
+)
+from backend.scheduler.services.auth_tokens import generate_reset_token, generate_auth_code, hash_token, token_ttl_minutes
 from backend.scheduler.services.mailer import send_password_reset_email, send_email_verification_email
 from backend.scheduler.services.sessions import create_user_session, get_user_from_session_cookie, revoke_session_by_cookie
 from backend.scheduler.services.maintenance import sync_scheduled_maintenance_statuses
@@ -137,6 +146,9 @@ async def create_tables():
                 replace_existing=True
             )
             maintenance_scheduler.start()
+
+        # Initialize the Discord bot on startup so it appears online immediately.
+        await initialize_discord_bot()
 
     except Exception as e:
         logger.error(f"Error creating database tables: {e}")
@@ -312,7 +324,7 @@ def _create_collaborator_copies(
                 start_time=owner_booking.start_time,
                 end_time=owner_booking.end_time,
                 status=owner_booking.status,
-                status_updated_at = datetime.now(),
+                status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None),
                 comment=owner_booking.comment,
                 collaborators=[owner_username] if owner_username else None,
             )
@@ -359,7 +371,7 @@ def _mark_slot_group_status(db: Session, owner_booking: models.Booking, status: 
     )
     for row in related:
         row.status = status
-        row.status_updated_at = datetime.now(),
+        row.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
 '''
     Parameters:
     - favorite: BookingFavorite model instance
@@ -471,6 +483,23 @@ def health_check():
     return {"status": "ok", "service": "scheduler-backend"}
 
 
+@app.post("/debug/discord/dm")
+async def debug_discord_dm(payload: dict, request: Request, db: Session = Depends(get_db)):
+    """Debug endpoint to test Discord DM delivery."""
+    user = get_user_from_session_cookie(db, request)
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    discord_id = payload.get("discord_id")
+    message = payload.get("message")
+    if not discord_id or not message:
+        raise HTTPException(status_code=400, detail="discord_id and message required")
+    
+    from backend.core.discord_utils import _send_bot_dm
+    success = await _send_bot_dm(discord_id, message)
+    return {"success": success, "discord_id": discord_id}
+
+
 '''
     Parameters:
     - request: Incoming HTTP request (session access)
@@ -525,8 +554,13 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
 '''
 '''
 @app.post("/auth/password-reset/request")
-def password_reset_request(payload: schemas.PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
-    generic_response = {"message": "If that account exists, a reset link has been sent."}
+def password_reset_request(
+    payload: schemas.PasswordResetRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    generic_response = {"message": "If that account exists, a reset code has been sent."}
 
     user = (
         db.query(models.User)
@@ -546,26 +580,33 @@ def password_reset_request(payload: schemas.PasswordResetRequest, request: Reque
         synchronize_session=False,
     )
     
-    raw_token = generate_reset_token()
-    hashed_token = hash_token(raw_token)
+    raw_code = generate_auth_code()
+    hashed_code = hash_token(raw_code)
     token_row = models.PasswordResetToken(
-        user_id = user.id,
-        token_hash = hashed_token,
-        expires_at = now + timedelta(minutes = token_ttl_minutes()),
-        requested_ip = (request.client.host if request.client else None),
-        requested_user_agent = request.headers.get("user-agent"),
+        user_id=user.id,
+        token_hash=hashed_code,
+        expires_at=now + timedelta(minutes=token_ttl_minutes()),
+        requested_ip=(request.client.host if request.client else None),
+        requested_user_agent=request.headers.get("user-agent"),
     )
     db.add(token_row)
     db.commit()
 
     try:
-        send_password_reset_email(
-            to_email = user.email,
-            reset_url = _build_reset_link(raw_token),
-            ttl_minutes = token_ttl_minutes(),
-        )
+        if user.discord_id:
+            background_tasks.add_task(
+                send_direct_discord_dm,
+                user.discord_id,
+                f"Your password reset code is: {raw_code}\nIt expires in {token_ttl_minutes()} minutes.",
+            )
+        else:
+            send_password_reset_email(
+                to_email=user.email,
+                reset_url=_build_reset_link(raw_code),
+                ttl_minutes=token_ttl_minutes(),
+            )
     except Exception as exc:
-        logger.exception("Failed to send password reset email: %s", exc)
+        logger.exception("Failed to send password reset notification: %s", exc)
     
     return generic_response
 
@@ -624,8 +665,13 @@ def email_verify_confirm(payload: schemas.EmailVerificationConfirm, db: Session 
     return { "message": "Email verified successfully. You can now sign in."}
 
 @app.post ("/auth/email-verify/resend", status_code=202)
-def email_verify_resend(payload: schemas.EmailVerificationResend, request: Request, db: Session = Depends(get_db)):
-    generic = {"message": "If that account exists and is pending verification, a new verification email has been sent."}
+def email_verify_resend(
+    payload: schemas.EmailVerificationResend,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    generic = {"message": "If that account exists and is pending verification, a new verification code has been sent."}
 
     user = db.query(models.User).filter(models.User.email == payload.email).first()
     if not user or (user.status or "").lower() != "pending_email_verification":
@@ -637,24 +683,31 @@ def email_verify_resend(payload: schemas.EmailVerificationResend, request: Reque
         models.EmailVerificationToken.consumed_at.is_(None),
     ).update({"consumed_at": now}, synchronize_session=False)
 
-    raw_token = generate_reset_token()
+    raw_code = generate_auth_code()
     db.add(models.EmailVerificationToken(
-        user_id = user.id,
-        token_hash = hash_token(raw_token),
-        expires_at = now + timedelta(minutes = _email_verify_ttl_minutes()),
-        requested_ip = (request.client.host if request and request.client else None),
-        requested_user_agent = (request.headers.get("user-agent") if request else None),
+        user_id=user.id,
+        token_hash=hash_token(raw_code),
+        expires_at=now + timedelta(minutes=_email_verify_ttl_minutes()),
+        requested_ip=(request.client.host if request and request.client else None),
+        requested_user_agent=(request.headers.get("user-agent") if request else None),
     ))
     db.commit()
 
     try:
-        send_email_verification_email(
-            to_email = user.email,
-            verify_url = _build_verify_link(raw_token),
-            ttl_minutes = _email_verify_ttl_minutes(),
-        )
+        if user.discord_id:
+            background_tasks.add_task(
+                send_direct_discord_dm,
+                user.discord_id,
+                f"Your account verification code is: {raw_code}\nIt expires in {_email_verify_ttl_minutes()} minutes.",
+            )
+        else:
+            send_email_verification_email(
+                to_email=user.email,
+                verify_url=_build_verify_link(raw_code),
+                ttl_minutes=_email_verify_ttl_minutes(),
+            )
     except Exception as exc:
-        logger.exception("Failed to resend verification email: %s", exc)
+        logger.exception("Failed to resend verification notification: %s", exc)
     
     return generic
         
@@ -736,7 +789,10 @@ def get_devices(request: Request, db: Session = Depends(get_db)):
 '''
 @app.post("/users/register", status_code=200, response_model=schemas.User)
 def register_user(
-    user: schemas.UserCreate, db: Session = Depends(get_db), request: Request = None
+    user: schemas.UserCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    request: Request = None,
 ):
 
     # Check if username is taken
@@ -756,49 +812,53 @@ def register_user(
     # This way verify_password(SHA256, bcrypt(SHA256)) will work
     hashed_pass = hash_password(user.password)
 
-    # Create new user
+    # Create new user in pending verification state
     new_user = models.User(
         username=user.username,
         email=normalized_email,
         discord_id=user.discord_id,
-        firstName = user.firstName.strip(),
-        lastName = user.lastName.strip(),
+        firstName=user.firstName.strip(),
+        lastName=user.lastName.strip(),
         password=hashed_pass,
-        role = "viewer",
-        status="active",
+        role="viewer",
+        status="pending_email_verification",
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    # raw_token = generate_reset_token()
-    # db.query(models.EmailVerificationToken).filter(
-    #     models.EmailVerificationToken.user_id == new_user.id,
-    #     models.EmailVerificationToken.consumed_at.is_(None),
-    # ).update({"consumed_at": datetime.utcnow()}, synchronize_session=False)
+    raw_code = generate_auth_code()
+    db.query(models.EmailVerificationToken).filter(
+        models.EmailVerificationToken.user_id == new_user.id,
+        models.EmailVerificationToken.consumed_at.is_(None),
+    ).update({"consumed_at": datetime.utcnow()}, synchronize_session=False)
 
-    # db.add(models.EmailVerificationToken(
-    #     user_id = new_user.id,
-    #     token_hash = hash_token(raw_token),
-    #     expires_at = datetime.utcnow() + timedelta(minutes = _email_verify_ttl_minutes()),
-    #     requested_ip = (request.client.host if request and request.client else None),
-    #     requested_user_agent = (request.headers.get("user-agent") if request else None),
-    # ))
-    # db.commit()
+    token_row = models.EmailVerificationToken(
+        user_id=new_user.id,
+        token_hash=hash_token(raw_code),
+        expires_at=datetime.utcnow() + timedelta(minutes=_email_verify_ttl_minutes()),
+        requested_ip=(request.client.host if request and request.client else None),
+        requested_user_agent=(request.headers.get("user-agent") if request else None),
+    )
+    db.add(token_row)
+    db.commit()
 
-    # try:
-    #     send_email_verification_email(
-    #         to_email = new_user.email,
-    #         verify_url = _build_verify_link(raw_token),
-    #         ttl_minutes = _email_verify_ttl_minutes(),
-    #     )
-    # except Exception as exc:
-    #     logger.exception("Failed to send verification email: %s", exc)
+    try:
+        if new_user.discord_id:
+            background_tasks.add_task(
+                send_direct_discord_dm,
+                new_user.discord_id,
+                f"Welcome {new_user.username}! Your account verification code is: {raw_code}\nEnter this code in the app to finish registration.",
+            )
+        else:
+            send_email_verification_email(
+                to_email=new_user.email,
+                verify_url=_build_verify_link(raw_code),
+                ttl_minutes=_email_verify_ttl_minutes(),
+            )
+    except Exception as exc:
+        logger.exception("Failed to send verification code: %s", exc)
 
-    # return {
-    #     "message": "Registration successful. Please verify your email.",
-    #     "requires_email_verification": True,
-    # }
     return {
         "id": new_user.id,
         "username": new_user.username,
@@ -863,7 +923,7 @@ def login_user(
         raise HTTPException(status_code=403, detail="Email verification required")
     if status_value != "active":
         raise HTTPException(status_code=403, detail="Account is inactive")
-    now = datetime.now()
+    now = datetime.now(IRELAND_TZ)
     user.previous_login_at = user.last_login_at
     user.last_login_at = now
     db.commit()
@@ -1029,7 +1089,7 @@ async def create_bookings(
                 end_time=b.end_time,
                 status=final_status,
                 comment=req.message,
-                status_updated_at = datetime.now(),
+                status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None),
                 collaborators=collaborator_usernames
                 if collaborator_usernames else None,
                 grouped_booking_id=grouped_booking_id,
@@ -1246,7 +1306,7 @@ def cancel_booking(
         for record in related_bookings:
             if record.status != "CANCELLED":
                 record.status = "CANCELLED"
-                record.status_updated_at = datetime.now()
+                record.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
                 updated_booking_ids.append(record.booking_id)
 
         if updated_booking_ids:
@@ -1272,7 +1332,7 @@ def cancel_booking(
             remaining = overlapping[0]
             if remaining.status == "CONFLICTING":
                 remaining.status = "PENDING"
-                remaining.status_updated_at = datetime.now()
+                remaining.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
                 downgraded_booking_id = remaining.booking_id
                 db.commit()
     except HTTPException as he:
@@ -1969,7 +2029,7 @@ def cancel_booking_group(
         for booking in bookings:
             if booking.status != "CANCELLED":
                 booking.status = "CANCELLED"
-                booking.status_updated_at = datetime.now()
+                booking.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
                 updated_booking_ids.append(booking.booking_id)
 
         if updated_booking_ids:
@@ -2519,7 +2579,7 @@ def get_my_bookings(
     user = current_user
 
     # Update the status of devices that are already expired but have not been updated
-    now = datetime.now()
+    now = datetime.now(IRELAND_TZ)
     db.query(models.Booking).filter(
         models.Booking.user_id == user.id,
         models.Booking.end_time < now,
@@ -3214,7 +3274,7 @@ def delete_booking(booking_id: int, db: Session = Depends(get_db)):
 @app.get("/bookings/for-week")
 def get_bookings_for_week(start: str, db: Session = Depends(get_db)):
 
-    now = datetime.now()
+    now = datetime.now(IRELAND_TZ)
     db.query(models.Booking).filter(
         models.Booking.end_time < now,
         ~models.Booking.status.in_(["CANCELLED", "EXPIRED", "REJECTED"]),
@@ -3519,7 +3579,7 @@ def update_topology(
     existing_topology.name = topology.name
     existing_topology.nodes = topology.nodes
     existing_topology.edges = topology.edges
-    existing_topology.updated_at = datetime.now()
+    existing_topology.updated_at = datetime.now(IRELAND_TZ)
 
     db.commit()
     db.refresh(existing_topology)

@@ -18,6 +18,7 @@ import {
   fetchBookings,
   approveBookings,
   declineBookings,
+  returnBookingsToPending,
   resolveConflicts,
 } from '../api';
 import { API_BASE_URL } from '../../config/api';
@@ -28,6 +29,7 @@ import { formatDateTime } from '../utils/formatters';
 import {
   canEditBookings,
   canExportBookings,
+  isSuperAdmin,
 } from '../utils/permissions';
 import BookingDetailDrawer from '../sections/BookingDetailDrawer';
 import ConflictResolutionModal from '../sections/ConflictResolutionModal';
@@ -62,7 +64,7 @@ export default function BookingsPage() {
   const navigate = useNavigate();
   const toast = useToastContext();
   const queryClient = useQueryClient();
-  const { permissions } = useAdminContext();
+  const { permissions, role } = useAdminContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const [dateRange, setDateRange] = usePersistentState('admin-bookings-date-range', {
     start: null,
@@ -183,6 +185,16 @@ export default function BookingsPage() {
     onError: (err) => toast.error(err?.message || 'Unable to decline bookings.'),
   });
 
+  const returnToPendingMutation = useMutation({
+    mutationFn: (payload) => returnBookingsToPending(payload),
+    onSuccess: async (result) => {
+      toast.success(`Returned ${result.updated.length} bookings to pending.`);
+      await queryClient.invalidateQueries({ queryKey: ['admin-bookings'] });
+      selection.clear();
+    },
+    onError: (err) => toast.error(err?.message || 'Unable to return bookings to pending.'),
+  });
+
   // const resolveMutation = useMutation({
   //   mutationFn: (payload) => resolveConflicts(payload),
   //   onSuccess: async () => {
@@ -201,16 +213,21 @@ export default function BookingsPage() {
     declineMutation.mutate({ booking_ids: selectedBookingIds });
   };
 
+  const handleBulkReturnToPending = () => {
+    returnToPendingMutation.mutate({ booking_ids: selectedBookingIds });
+  };
+
   const handleResolveConflicts = () => {
-    if (selectedBookingIds.length === 2){
+    const selectedGroups = groupedRows.filter(row => selection.state.ids.has(row.grouped_booking_id));
+    if (selectedGroups.length === 2){
       const next = new URLSearchParams(searchParams);
-      next.set('resolve-id-1', String(selectedBookingIds[0]));
-      next.set('resolve-id-2', String(selectedBookingIds[1]));
+      next.set('resolve-id-1', String(selectedGroups[0].booking_ids[0]));
+      next.set('resolve-id-2', String(selectedGroups[1].booking_ids[0]));
       setSearchParams(next, { replace: true });
-    } else if (selectedBookingIds.length > 2){
+    } else if (selectedGroups.length > 2){
       toast.error('Select exactly 2 conflicting bookings to compare and resolve.');
-    } else if (selectedBookingIds.length === 1){
-      toast.error('Select at least 2 bookings to resolve conflicts.');
+    } else {
+      toast.error('Select exactly 2 bookings to resolve conflicts.');
     }
   };
 
@@ -410,6 +427,16 @@ export default function BookingsPage() {
             >
               Resolve conflicts
             </button>
+            {isSuperAdmin(role) && (
+              <button
+                type="button"
+                onClick={handleBulkReturnToPending}
+                disabled={disabled || returnToPendingMutation.isPending || hasCancelledBooking}
+                className="px-3 py-1.5 text-xs font-semibold rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60"
+              >
+                Return to pending
+              </button>
+            )}
           </>
         )}
       </div>

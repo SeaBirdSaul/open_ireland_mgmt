@@ -1,7 +1,10 @@
 """
 Integration tests for the new admin v2 API surface.
 """
-from datetime import UTC, datetime, timedelta
+from datetime import  datetime, timedelta
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 import pytest
 
@@ -17,7 +20,7 @@ from backend.scheduler.models import (
 
 
 def _make_booking(db, user, device, *, status="PENDING", delta_hours=1):
-    start = datetime.now(UTC) + timedelta(hours=delta_hours)
+    start = datetime.now(IRELAND_TZ) + timedelta(hours=delta_hours)
     end = start + timedelta(hours=2)
     booking = Booking(
         device_id=device.id,

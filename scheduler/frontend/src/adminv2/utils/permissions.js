@@ -31,3 +31,7 @@ export function canActOnTopologies(permissions) {
   return Boolean(permissions?.['topologies:write']);
 }
 
+export function isSuperAdmin(role) {
+  return String(role || '').toLowerCase() === 'super admin';
+}
+

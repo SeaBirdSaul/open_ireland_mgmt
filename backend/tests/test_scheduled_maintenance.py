@@ -17,6 +17,9 @@ from backend.scheduler.services.maintenance import (
     sync_scheduled_maintenance_statuses,
     MAINTENANCE_DECLINE_COMMENT
 )
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 def _marker(segment: str, dt: datetime) -> str:
     return f"{segment}/{dt.strftime('%Y-%m-%d')}"
@@ -28,7 +31,7 @@ def temp_maintenance_device(db_session):
     """
     device = Device(
         deviceType = "TestSwitch",
-        deviceName = f"scheduled-maint-device-{int(datetime.now().timestamp() * 1000000)}",
+        deviceName = f"scheduled-maint-device-{int(datetime.now(IRELAND_TZ).timestamp() * 1000000)}",
         ip_address = None,
         maintenance_start = None,
         maintenance_end = None,
@@ -46,7 +49,7 @@ def temp_booking_on_device(db_session, test_user, temp_maintenance_device):
     """
     Creates a booking that can be overlapped by maintenance windows.
     """
-    start_time = datetime.now() + timedelta(days = 1, hours = 1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days = 1, hours = 1)
     end_time = start_time + timedelta(hours = 2)
 
     booking = Booking(

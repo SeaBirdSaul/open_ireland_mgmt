@@ -1,13 +1,17 @@
-from datetime import datetime, UTC
+from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+import pytz
 from backend.core.deps import get_db
 from backend.scheduler import models
+
+# Timezone for Ireland
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 def _derive_status(inv: models.AdminInvitation) -> str:
     if inv.accepted_at:
         return "accepted"
-    if inv.expires_at <= datetime.now():
+    if inv.expires_at <= datetime.now(IRELAND_TZ):
         return "expired"
     return "pending"
 
@@ -17,7 +21,7 @@ def accept_invitation_record(inv: models.AdminInvitation, db: Session) -> models
         raise HTTPException(status_code=404, detail="Invalid invitation token")
     if inv.accepted_at:
         raise HTTPException(status_code=409, detail="Invitation already accepted")
-    if inv.expires_at <= datetime.now():
+    if inv.expires_at <= datetime.now(IRELAND_TZ):
         raise HTTPException(status_code=410, detail="Invitation expired")
 
     # gets registed handle or the start of the email address if no handle provided
@@ -40,7 +44,7 @@ def accept_invitation_record(inv: models.AdminInvitation, db: Session) -> models
     db.add(user)
     db.flush()
 
-    inv.accepted_at = datetime.now()
+    inv.accepted_at = datetime.now(IRELAND_TZ)
     db.commit()
     return user
 
