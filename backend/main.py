@@ -2768,10 +2768,10 @@ def get_my_bookings(
             return "CANCELLED"
         if any(s in {"REJECTED", "DECLINED"} for s in upper_statuses):
             return "DECLINED"
-        if any(s == "EXPIRED" for s in upper_statuses):
-            return "EXPIRED"
-        if any(s in {"PENDING"} for s in upper_statuses):
+        if any(s == "PENDING" for s in upper_statuses):
             return "PENDING"
+        if any(s in {"EXPIRED"} for s in upper_statuses):
+            return "EXPIRED"
         if any(s == "CONFLICTING" for s in upper_statuses):
             return "CONFLICTING"
         if any(s in {"APPROVED", "CONFIRMED"} for s in upper_statuses):
@@ -3475,7 +3475,7 @@ def check_conflicts(req: schemas.ConflictCheckRequest, db: Session = Depends(get
                 day_iter += timedelta(days=1)
 
         # if device.status == "Maintenance" is true, which means that those slots will be unavailable.
-        if device.status.lower() == "maintenance":
+        if device.status and device.status.lower() in {"maintenance", "unavailable"}:
             # day by day => from req.start~req.end
             day_iter = req.start.date()
             while day_iter <= req.end.date():

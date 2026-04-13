@@ -884,6 +884,10 @@ export default function ScheduleTable({ calendarValue, globalSelections, setGlob
         // Show the maintenance status slots
         const device = devices.find(d => d.name === deviceName)?.subDevices.find(s => s.name === subName);
 
+        if ((device.status || '').toLowerCase() === 'unavailable') {
+            return " maintenance-slot";
+        }
+        
         if (device?.maintenance_start && device?.maintenance_end) {
             const range = parseMaintenanceDateRange(device.maintenance_start, device.maintenance_end);
 

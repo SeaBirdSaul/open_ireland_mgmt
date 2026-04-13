@@ -18,6 +18,36 @@ ADMIN_WEBHOOK = os.getenv("ADMIN_WEBHOOK", "")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 DISCORD_BOT_ENABLED = bool(DISCORD_BOT_TOKEN)
 DISCORD_USE_DM = os.getenv("DISCORD_USE_DM", "false").lower() == "true"
+MAX_DISCORD_CONTENT_LEN = 1900
+DISCORD_TRUNCATION_SUFFIX = "\n> ...message truncated."
+
+
+def _truncate_discord_content(content: str) -> str:
+    if not content:
+        return content
+    
+    if len(content) <= MAX_DISCORD_CONTENT_LEN:
+        return content
+    
+    max_body_len = MAX_DISCORD_CONTENT_LEN - len(DISCORD_TRUNCATION_SUFFIX)
+    if max_body_len <= 0:
+        return DISCORD_TRUNCATION_SUFFIX[:MAX_DISCORD_CONTENT_LEN]
+
+    lines = content.splitlines()
+    kept_lines = []
+    current_len = 0
+
+    for line in lines:
+        candidate = line if not kept_lines else f"\n{line}"
+        if current_len + len(candidate) > max_body_len:
+            break
+        kept_lines.append(line)
+        current_len += len(candidate)
+
+    if kept_lines:
+        return "\n".join(kept_lines) + DISCORD_TRUNCATION_SUFFIX
+    
+    return content[:max_body_len] + DISCORD_TRUNCATION_SUFFIX
 
 # Bot client (lazy-loaded)
 _bot_client = None
@@ -72,7 +102,8 @@ async def _send_bot_dm(discord_id: str, content: str):
             return False
         
         user = await client.fetch_user(int(discord_id))
-        await user.send(content)
+        safe_content = _truncate_discord_content(content)
+        await user.send(safe_content)
         logger.info(f"Sent Discord DM to user {discord_id}")
         return True
     except Exception as e:
@@ -92,7 +123,7 @@ async def _post_to_webhook(url: str, content: str, allowed_mentions: dict | None
         return False
 
     try:
-        payload = {"content": content}
+        payload = {"content": _truncate_discord_content(content)}
         if allowed_mentions is not None:
             payload["allowed_mentions"] = allowed_mentions
 
@@ -140,6 +171,9 @@ async def send_admin_action_notification(content: str, discord_id: str):
         logger.info(f"Bot DM failed for {discord_id}; falling back to webhook")
     
     # Webhook mode (default or fallback)
+    MAX_DISCORD_CONTENT_LEN = 1900
+    if content and len(content) > MAX_DISCORD_CONTENT_LEN:
+        content = content[:MAX_DISCORD_CONTENT_LEN - 24] + "\n> ...message truncated."
     if ADMIN_WEBHOOK:
         mentions = {
             "users": [discord_id] if discord_id else [],

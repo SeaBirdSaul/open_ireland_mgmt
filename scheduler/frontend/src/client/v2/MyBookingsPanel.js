@@ -67,6 +67,7 @@ async function rebookBookingGroup(groupId, userId, startDate, endDate, message) 
 
 const STATUS_META = {
   APPROVED: { label: 'Approved', icon: '🟢', bg: 'bg-emerald-100/70 dark:bg-emerald-900/30', text: 'text-emerald-700 dark:text-emerald-200' },
+  ONGOING: { label: 'On Going', icon: '🟢', bg: 'bg-blue-100/70 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-200' },
   PENDING: { label: 'Pending', icon: '🟡', bg: 'bg-amber-100/70 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-200' },
   DECLINED: { label: 'Declined', icon: '🔴', bg: 'bg-red-100/70 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-200' },
   CANCELLED: { label: 'Cancelled', icon: '⚪', bg: 'bg-gray-200 dark:bg-gray-700', text: 'text-gray-700 dark:text-gray-200' },
@@ -279,9 +280,27 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
       return next;
     });
   };
+  const getDisplayStatus = (group) => {
+    const key = (group.status || '').toUpperCase();
 
-  const statusMeta = (status) => {
-    const key = (status || '').toUpperCase();
+    if (key === 'PENDING'){
+      return 'PENDING';
+    }
+
+    const now = new Date();
+    const start = new Date(`${group.start_date}T00:00:00`);
+    const end = new Date(`${group.end_date}T23:59:59.999`);
+    const isWithinWindow = now >= start && now <= end;
+
+    if (isWithinWindow && (key === 'APPROVED' || key === 'CONFIRMED' || key === 'EXPIRED')) {
+      return 'ONGOING';
+    }
+    
+    return key || 'PENDING'
+  }
+
+  const statusMeta = (group) => {
+    const key = getDisplayStatus(group);
     return STATUS_META[key] || STATUS_META.PENDING;
   };
 
@@ -772,7 +791,7 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
         {!isLoading &&
           !error &&
           paginatedGroups.map((group) => {
-            const status = statusMeta(group.status);
+            const status = statusMeta(group);
             const expanded = expandedGroups.has(group.grouped_booking_id);
             const isOwner = group.is_owner;
             const summary = group.summary || {};

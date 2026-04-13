@@ -7,7 +7,7 @@ const getApiBaseUrl = () => {
   // Always use the current hostname to ensure same-origin for cookies
   // This fixes cross-origin cookie issues when accessing via IP address
   const hostname = window.location.hostname;
-  const defaultPort = 25001; // Default backend port (matches docker-compose)
+  const defaultPort = 20001; // Default backend port (matches docker-compose)
   const apiUrl = `http://${hostname}:${defaultPort}`;
 
   // If REACT_APP_API_URL is set and matches current hostname, use it

@@ -26,6 +26,10 @@ const MAINTENANCE_SEGMENTS = {
 };
 
 /**HELPER FUNCTIONS */
+function isDeviceUnavailable(device) {
+    const status = (device?.status || '').trim().toLowerCase();
+    return status === 'unavailable' || status === 'offline';
+}
 function isDeviceInMaintenanceOnDate(device, dateStr) {
     const window = parseMaintenanceWindow(device);
     if (!window) {
@@ -45,6 +49,11 @@ function isDeviceInMaintenanceOnDate(device, dateStr) {
 }
 
 function getMaintenanceLabel(device) {
+    const status = (device?.status || '').toLowerCase();
+    if (status === 'unavailable') {
+        return 'Unavailable'
+    }
+
     const window = parseMaintenanceWindow(device);
     if (!window) {
         return 'Maintenance';
@@ -73,7 +82,7 @@ function getCellClasses(cellState, inDragRange = false) {
         cellClasses += 'bg-neutral-100 dark:bg-neutral-800 opacity-50 cursor-not-allowed pattern-diagonal-lines';
     } else if (cellState === 'newlyConfirmed') {
         cellClasses += 'bg-green-400 dark:bg-green-600 animate-pulse cursor-not-allowed border-green-500 dark:border-green-700 shadow-md';
-    } else if (cellState === 'maintenance') {
+    } else if (cellState === 'maintenance' || cellState === 'unavailable') {
         cellClasses += 'text-orange-800 dark:text-orange-100 border-2 border-orange-400 dark:border-orange-600 cursor-not-allowed shadow-sm relative overflow-hidden';
     } else if (cellState === 'selected') {
         cellClasses += 'cursor-pointer shadow-md';
@@ -101,6 +110,10 @@ function getCellClasses(cellState, inDragRange = false) {
 function getCellTitle(cellState, device, day, bookedInfo, currentUserName) {
     if (cellState === 'past') {
         return `${device.deviceName} - ${day.fullLabel} (Past)`;
+    }
+
+    if (cellState === 'unavailable') {
+        return `${device.deviceName} - ${day.fullLabel} (Unavailable)`;
     }
 
     if (cellState === 'maintenance') {
@@ -156,7 +169,7 @@ function getCellStyle(cellState, inDragRange, bookedBg, bookedBorder) {
                 backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
                 borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
             }
-            : cellState === 'maintenance'
+            : cellState === 'maintenance' || cellState === 'unavailable'
             ? {
                 background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.18) 0px, rgba(249,115,22,0.18) 8px, rgba(251,146,60,0.32) 8px, rgba(251,146,60,0.32) 16px)',
                 backgroundColor: 'rgba(251, 146, 60, 0.22)',
@@ -626,6 +639,10 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                 return 'past';
             }
 
+            if (isDeviceUnavailable(device)) {
+                return 'unavailable';
+            }
+
             if (isDeviceInMaintenanceOnDate(device, dateStr)) {
                 return 'maintenance';
             }
@@ -933,7 +950,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
 
                         if (cellState === 'past') {
                             cellClasses += 'bg-neutral-100 dark:bg-neutral-800 opacity-50 cursor-not-allowed';
-                        } else if (cellState === 'maintenance') {
+                        } else if (cellState === 'maintenance' || cellState === 'unavailable') {
                             cellClasses += 'text-orange-800 dark:text-orange-100 border-2 border-orange-400 dark:border-orange-600 cursor-not-allowed shadow-sm relative overflow-hidden';
                         } else if (cellState === 'selected') {
                             cellClasses += 'cursor-pointer shadow-md';
@@ -958,8 +975,10 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
 
                         if (cellState === 'past') {
                             title = `${device.deviceName} - ${day.fullLabel} (Past)`;
+                        } else if (cellState === 'unavailable') {
+                            title = `${device.deviceName} - ${day.fullLabel} (Unavailable)`;
                         } else if (cellState === 'maintenance') {
-                            title = `${device.deviceName} - ${day.fullLabel} (Unavailable: device is in maintenance)`;
+                            title = `${device.deviceName} - ${day.fullLabel} (${getMaintenanceLabel(device)})`;
                         } else if (cellState === 'booked') {
                             const ownerLabel = bookedInfo?.ownerUsername || 'Another user';
                             const collaboratorsList = bookedInfo?.collaborators || [];
@@ -989,7 +1008,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                     backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
                                     borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
                                 }
-                                : cellState === 'maintenance'
+                                : cellState === 'maintenance' || cellState === 'unavailable'
                                 ? {
                                     background: 'repeating-linear-gradient(135deg, rgba(249,115,22,0.18) 0px, rgba(249,115,22,0.18) 8px, rgba(251,146,60,0.32) 8px, rgba(251,146,60,0.32) 16px)',
                                     backgroundColor: 'rgba(251, 146, 60, 0.22)',
@@ -1010,11 +1029,12 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                 }
                                 : {}),
                         };
-
                         const isMaintenance = cellState === 'maintenance';
+                        const isUnavailable = cellState === 'unavailable';
                         const isBlocked =
                             cellState === 'past' ||
                             cellState === 'maintenance' ||
+                            cellState === 'unavailable' ||
                             cellState === 'booked' ||
                             cellState === 'bookedConfirmed' ||
                             cellState === 'ownedConfirmed';
@@ -1033,10 +1053,10 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                 onMouseUp={isBlocked ? undefined : () => handleDragEnd(device.id, day.date)}
                                 title={title}
                             >
-                                {isMaintenance && (
+                                {(isMaintenance || isUnavailable) && (
                                     <div className="flex h-full w-full items-center justify-center">
                                         <span className="rounded bg-white/85 dark:bg-black/35 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-orange-900 dark:text-orange-100">
-                                            Maint
+                                            {isUnavailable ? 'Unavail' : 'Maint'}
                                         </span>
                                     </div>
                                 )}
@@ -1335,10 +1355,12 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                                                         cellState === 'past' ||
                                                                         cellState === 'newlyConfirmed' ||
                                                                         cellState === 'maintenance' ||
+                                                                        cellState === 'unavailable' ||
                                                                         cellState === 'booked' ||
                                                                         cellState === 'bookedConfirmed' ||
                                                                         cellState === 'ownedConfirmed';
                                                                     const isMaintenance = cellState === 'maintenance';
+                                                                    const isUnavailable = cellState === 'unavailable';
 
                                                                     const isHoverable = cellState === 'selected' || cellState === 'ownedPending' || cellState === 'ownedConfirmed';
                                                                     const hoverableClass = isHoverable ? 'timeline-cell-hoverable' : '';
@@ -1409,10 +1431,10 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                                                                                 e.target.classList.remove('ring-2', 'ring-offset-2');
                                                                             }}
                                                                         >
-                                                                            {isMaintenance && (
+                                                                            {(isMaintenance || isUnavailable) && (
                                                                                 <div className="flex h-full w-full items-center justify-center">
                                                                                     <span className="rounded bg-white/85 dark:bg-black/35 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-orange-900 dark:text-orange-100">
-                                                                                        Maint
+                                                                                        {isUnavailable ? 'Unavail' : 'Maint'}
                                                                                     </span>
                                                                                 </div>
                                                                             )}
@@ -1477,7 +1499,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                               backgroundColor: 'rgba(251, 146, 60, 0.22)',
                           }}
                         />
-                        <span className="text-gray-600 dark:text-gray-400">Maintenance</span>
+                        <span className="text-gray-600 dark:text-gray-400">Maintenance / Unavailable</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-neutral-100 dark:bg-neutral-800 rounded-sm opacity-50" />

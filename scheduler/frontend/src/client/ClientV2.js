@@ -476,10 +476,10 @@ function ClientV2Inner() {
         toast.error('Passwords do not match.');
         return;
       }
-      if (!/^\d{17,18}$/.test(discordId)) {
-        toast.error('Discord ID must be a 17 or 18 digit number');
-        return;
-      }
+      // if (!/^\d{17,18}$/.test(discordId)) {
+      //   toast.error('Discord ID must be a 17 or 18 digit number');
+      //   return;
+      // }
 
       setAuthSubmitting(true);
       try {
@@ -808,12 +808,12 @@ function ClientV2Inner() {
                     >
                       Admin Panel
                     </button>
-                    <button
+                    {/* <button
                       onClick={() => navigate('/topology')}
                       className="px-4 py-2 text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors"
                     >
                       Composer
-                    </button>
+                    </button> */}
                     <button
                       onClick={() => {
                         setIsNavigating(true);

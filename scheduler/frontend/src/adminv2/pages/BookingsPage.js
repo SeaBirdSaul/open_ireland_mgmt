@@ -240,12 +240,12 @@ export default function BookingsPage() {
 
   const columns = useMemo(
     () => [
-      {
-        key: 'grouped_booking_id',
-        header: 'Group ID',
-        accessor: (row) => row.grouped_booking_id,
-        className: 'font-mono text-xs text-gray-500 dark:text-gray-400',
-      },
+      // {
+      //   key: 'grouped_booking_id',
+      //   header: 'Group ID',
+      //   accessor: (row) => row.grouped_booking_id,
+      //   className: 'font-mono text-xs text-gray-500 dark:text-gray-400',
+      // },
       {
         key: 'user',
         header: 'User',

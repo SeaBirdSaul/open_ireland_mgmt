@@ -27,6 +27,7 @@ IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 from backend.scheduler.services.maintenance import (
     apply_maintenance_to_devices, 
+    apply_blocking_status_to_devices,
     device_is_entering_maintenance,
     is_maintenance_window_valid,
     is_maintenance_active_at,
@@ -63,6 +64,33 @@ def sync_inventory_device_status(
     inventory_device.status = status
     inventory_device.maintenance_start = maintenance_start
     inventory_device.maintenance_end = maintenance_end
+
+def _build_group_devices_summary(device_ranges: dict[tuple[str, str], dict]) -> str:
+    MAX_DISCORD_MESSAGE_LEN = 1900
+
+    device_lines = []
+    for (device_type, device_name), times in sorted(device_ranges.items()):
+        start_str = times["start"].strftime("%Y-%m-%d %H:%M")
+        end_str = times["end"].strftime("%Y-%m-%d %H:%M")
+        device_lines.append(
+            f"> Device: **{device_type} - {device_name}**: {start_str} - {end_str}"
+        )
+    
+    kept_lines = []
+    for idx, line in enumerate(device_lines):
+        remaining = len(device_lines) - (idx + 1)
+        suffix = f"\n> ...and {remaining} more affected device(s)." if remaining > 0 else ""
+        candidate = "\n".join(kept_lines + [line]) + suffix
+        if len(candidate) > MAX_DISCORD_MESSAGE_LEN:
+            break
+        kept_lines.append(line)
+    
+    omitted = len(device_lines) - len(kept_lines)
+    result = "\n".join(kept_lines)
+    if omitted > 0:
+        result += f"/n> ...and {omitted} more affected device(s)."
+    
+    return result
 
 # Gets info from User_table in order to get permissions and other details
 # Note: Role, Status and Permissions are currently hardcoded
@@ -437,15 +465,8 @@ def approve_bookings(payload: dict, request: Request, background_tasks: Backgrou
             else:
                 device_ranges[device_key]['start'] = min(device_ranges[device_key]['start'], b.start_time)
                 device_ranges[device_key]['end'] = max(device_ranges[device_key]['end'], b.end_time)
-        devices_info = []
-        for (device_type, device_name), times in device_ranges.items():
-            start_str = times['start'].strftime("%Y-%m-%d %H:%M")
-            end_str = times['end'].strftime("%Y-%m-%d %H:%M")
-            devices_info.append(
-                f"> Device: **{device_type} - {device_name}**\n"
-                f"> Time Period: {start_str} ~ {end_str}"
-            )
-        devices_str = "\n".join(devices_info)
+        
+        devices_str = _build_group_devices_summary(device_ranges)
         
         # Check if this is a collaborative booking
         collab_info = ""
@@ -518,15 +539,8 @@ def decline_bookings(payload: dict, request: Request, background_tasks: Backgrou
             else:
                 device_ranges[device_key]['start'] = min(device_ranges[device_key]['start'], b.start_time)
                 device_ranges[device_key]['end'] = max(device_ranges[device_key]['end'], b.end_time)
-        devices_info = []
-        for (device_type, device_name), times in device_ranges.items():
-            start_str = times['start'].strftime("%Y-%m-%d %H:%M")
-            end_str = times['end'].strftime("%Y-%m-%d %H:%M")
-            devices_info.append(
-                f"> Device: **{device_type} - {device_name}**\n"
-                f"> Time Period: {start_str} ~ {end_str}"
-            )
-        devices_str = "\n".join(devices_info)
+        
+        devices_str = _build_group_devices_summary(device_ranges)
         
         # Check if this is a collaborative booking
         collab_info = ""
@@ -599,15 +613,9 @@ def return_bookings_to_pending(payload: dict, request: Request, background_tasks
             else:
                 device_ranges[device_key]['start'] = min(device_ranges[device_key]['start'], b.start_time)
                 device_ranges[device_key]['end'] = max(device_ranges[device_key]['end'], b.end_time)
-        devices_info = []
-        for (device_type, device_name), times in device_ranges.items():
-            start_str = times['start'].strftime("%Y-%m-%d %H:%M")
-            end_str = times['end'].strftime("%Y-%m-%d %H:%M")
-            devices_info.append(
-                f"> Device: **{device_type} - {device_name}**\n"
-                f"> Time Period: {start_str} ~ {end_str}"
-            )
-        devices_str = "\n".join(devices_info)
+        
+
+        devices_str = _build_group_devices_summary(device_ranges)
         
         # Check if this is a collaborative booking
         collab_info = ""
@@ -769,6 +777,8 @@ def update_device_detail(
     
     device.ip_address = str(payload.ip_address) if payload.ip_address else None
     
+    blocking_result = None
+
     if payload.status == "Maintenance":
         if not is_maintenance_window_valid(payload.maintenance_start, payload.maintenance_end):
             raise HTTPException(status_code=400, detail="Valid maintenance start and end are required.")
@@ -779,12 +789,40 @@ def update_device_detail(
         device.maintenance_start = payload.maintenance_start
         device.maintenance_end = payload.maintenance_end
         device.status = resolve_status_for_scheduled_maintenance(
-            requested_status = payload.status,
-            previous_status = previous_status,
-            maintenance_start = payload.maintenance_start,
-            maintenance_end = payload.maintenance_end,
-            fallback_status = getattr(device, "maintenance_return_status", None) or "Available",
-        )    
+            requested_status=payload.status,
+            previous_status=previous_status,
+            maintenance_start=payload.maintenance_start,
+            maintenance_end=payload.maintenance_end,
+            fallback_status=getattr(device, "maintenance_return_status", None) or "Available",
+        )
+
+        if (
+            device_is_entering_maintenance(previous_status, device.status)
+            and is_maintenance_active_at(
+                maintenance_start=device.maintenance_start,
+                maintenance_end=device.maintenance_end,
+            )
+        ):
+            blocking_result = apply_blocking_status_to_devices(
+                db,
+                devices=[device],
+                reason_status="Maintenance",
+            )
+
+    elif payload.status == "Unavailable":
+        device.status = "Unavailable"
+        device.maintenance_start = None
+        device.maintenance_end = None
+        if hasattr(device, "maintenance_return_status"):
+            device.maintenance_return_status = None
+
+        if previous_status != "Unavailable":
+            blocking_result = apply_blocking_status_to_devices(
+                db,
+                devices=[device],
+                reason_status="Unavailable",
+            )
+
     else:
         device.status = payload.status
         device.maintenance_start = None
@@ -805,14 +843,14 @@ def update_device_detail(
     )
 
     maintenance_result = None
-    if (device_is_entering_maintenance(previous_status, device.status) and is_maintenance_active_at(maintenance_start = device.maintenance_start, maintenance_end = deivce.maintenance_end)):
-        maintenance_result = apply_maintenance_to_devices(db, devices=[device])
+    if (device_is_entering_maintenance(previous_status, device.status) and is_maintenance_active_at(maintenance_start = device.maintenance_start, maintenance_end = device.maintenance_end)):
+        maintenance_result = apply_blocking_status_to_devices(db, devices=[device], reason_status="Maintenance")
 
     db.commit()
     db.refresh(device)
 
-    if maintenance_result:
-        for notification in maintenance_result.notifications:
+    if blocking_result:
+        for notification in blocking_result.notifications:
             if notification.discord_id:
                 background_tasks.add_task(
                     send_admin_action_notification,
@@ -823,8 +861,8 @@ def update_device_detail(
     return {
         "device": device,
         "maintenance": {
-            "affected_booking_ids": maintenance_result.affected_booking_ids if maintenance_result else [],
-            "affected_count": maintenance_result.affected_count if maintenance_result else 0
+            "affected_booking_ids": blocking_result.affected_booking_ids if blocking_result else [],
+            "affected_count": blocking_result.affected_count if blocking_result else 0
         }
     }
 
@@ -847,42 +885,54 @@ def update_device_status(
         .all()
     )
     maintenance_candidates = []
+    unavailable_candidates = []
 
     for device in rows:
         previous_status = device.status
+        requested_status = "Unavailable" if payload.status == "Offline" else payload.status
 
-        if payload.status == "Offline":
+        if requested_status == "Maintenance":
+            if not is_maintenance_window_valid(payload.maintenance_start, payload.maintenance_end):
+                raise HTTPException(status_code=400, detail="Valid maintenance start and end are required.")
+
+            if previous_status != "Maintenance":
+                device.maintenance_return_status = previous_status or "Available"
+            
+            device.maintenance_start = payload.maintenance_start
+            device.maintenance_end = payload.maintenance_end
+            device.status = resolve_status_for_scheduled_maintenance(
+                requested_status = requested_status,
+                previous_status = previous_status,
+                maintenance_start = payload.maintenance_start,
+                maintenance_end = payload.maintenance_end,
+                fallback_status = getattr(device, "maiantenance_return_status", None) or "Available",
+            )
+
+            if (
+                device_is_entering_maintenance(previous_status, device.status)
+                and is_maintenance_active_at(
+                    maintenance_start = device.maintenance_start,
+                    maintenance_end = device.maintenance_end
+                )
+            ):
+                maintenance_candidates.append(device)
+        
+        elif requested_status == "Unavailable":
             device.status = "Unavailable"
             device.maintenance_start = None
             device.maintenance_end = None
+            if hasattr(device, "maintenance_return_status"):
+                device.maintenance_return_status = None
+            
+            if previous_status != "Unavailable":
+                unavailable_candidates.append(device)
+        
         else:
-            if payload.status == "Maintenance":
-                if not is_maintenance_window_valid(payload.maintenance_start, payload.maintenance_end):
-                    raise HTTPException(status_code=400, detail="Valid maintenance start and end are required.")
-
-                if previous_status != "Maintenance":
-                    device.maintenance_return_status = previous_status or "Available"
-                
-                device.maintenance_start = payload.maintenance_start
-                device.maintenance_end = payload.maintenance_end
-                device.maintenance_return_status = resolve_status_for_scheduled_maintenance(
-                    requested_status = payload.status,
-                    previous_status = previous_status,
-                    maintenance_start = payload.maintenance_start,
-                    maintenance_end = payload.maintenance_end,
-                    fallback_status = getattr(device, "maintenance_return_status", None) or "Available",
-                )
-            else:
-                device.status = payload.status
-                device.maintenance_start = None
-                device.maintenance_end = None
-                if hasattr(device, "maintenance_return_status"):
-                    device.maintenance_return_status = None
-
-                if is_maintenance_active_at(maintenance_start = device.maintenance_start, maintenance_end = device.maintenance_end):
-                    device.status = "Maintenance"
-                    maintenance_candidates.append(device)
-                    
+            device.status = requested_status
+            device.maintenance_start = None
+            device.maintenance_end = None
+            if hasattr(device, "maintenance_return_status"):
+                device.maintenance_return_status = None
         
         sync_inventory_device_status(
             db,
@@ -892,32 +942,43 @@ def update_device_status(
             maintenance_start=device.maintenance_start,
             maintenance_end=device.maintenance_end,
         )
-
-        if device_is_entering_maintenance(previous_status, device.status):
-            maintenance_candidates.append(device)
-
     maintenance_result = None
+    unavailable_result = None
+
     if maintenance_candidates:
-        maintenance_result = apply_maintenance_to_devices(db, devices=maintenance_candidates)
+        maintenance_result = apply_blocking_status_to_devices(db, devices=maintenance_candidates, reason_status="Maintenance")
+
+    if unavailable_candidates:
+            unavailable_result = apply_blocking_status_to_devices(db, devices=unavailable_candidates, reason_status="Unavailable")
+        
+    combined_notifications = []
+    affected_booking_ids = []
+    affected_count = 0
+
+    for result in (maintenance_result, unavailable_result):
+        if not result:
+            continue
+        combined_notifications.extend(result.notifications)
+        affected_booking_ids.extend(result.affected_booking_ids)
+        affected_count += result.affected_count
 
     db.commit()
     
-    if maintenance_result:
-        for notification in maintenance_result.notifications:
+    if combined_notifications:
+        for notification in combined_notifications:
             if notification.discord_id:
                 background_tasks.add_task(
-                    send_admin_action_notification,
+                    send_admin_action_notification, 
                     notification.message,
                     notification.discord_id
-                )    
+                )
 
     return {
         "updated": [device.id for device in rows],
-        "Count": len(rows),
         "maintenance": {
-            "affected_booking_ids": maintenance_result.affected_booking_ids if maintenance_result else [],
-            "affected_count": maintenance_result.affected_count if maintenance_result else 0
-        }
+            "affected_booking_ids": sorted(set(affected_booking_ids)),
+            "affected_count": affected_count,
+        },
     }
 
 @router.get("/users")

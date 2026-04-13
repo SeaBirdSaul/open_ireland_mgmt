@@ -41,11 +41,17 @@ const useAuthStore = create((set, get) => ({
     inUseRefresh = (async () => {
       if (get().authEpoch !== startEpoch) return;
       set({ loading: true });
+
+      let controller = null;
+      let timeoutId = null;
+
       try {
         // Create abort controller for timeout
-        activeAuthAbortController = new AbortController();
-        const timeoutId = setTimeout(() => activeAuthAbortController.abort(), 10000); // 10 second timeout
-        
+        controller = new AbortController();
+        activeAuthAbortController = controller;
+
+        timeoutId = setTimeout(() => controller.abort(), 10000);
+
         const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
           method: 'GET',
           credentials: 'include',
@@ -53,7 +59,9 @@ const useAuthStore = create((set, get) => ({
         });
         
         clearTimeout(timeoutId);
-        activeAuthAbortController = null;
+        if (activeAuthAbortController === controller) {
+          activeAuthAbortController = null;
+        }
 
         // Handle network errors or non-OK responses
         if (!res.ok) {
@@ -130,6 +138,7 @@ const useAuthStore = create((set, get) => ({
       ) {
         if (retryCount < 2) {
           // Retry with exponential backoff
+          inUseRefresh = null;
           await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
           return get().refreshAuth(retryCount + 1);
         }
@@ -145,8 +154,13 @@ const useAuthStore = create((set, get) => ({
       if (get().authEpoch !== startEpoch) return;
       set({ loading: false });
     } finally { 
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       inUseRefresh = null;
-      activeAuthAbortController = null;
+      if (activeAuthAbortController === controller) {
+        activeAuthAbortController = null;
+      }
     }
   })();
   return inUseRefresh;      

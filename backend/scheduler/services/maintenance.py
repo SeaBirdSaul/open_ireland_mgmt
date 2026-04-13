@@ -12,6 +12,11 @@ IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 ACTIVE_BOOKING_STATUSES = {"PENDING", "CONFIRMED", "CONFLICTING"}
 TERMINAL_BOOKING_STATUSES = {"DECLINED", "CANCELLED", "EXPIRED"}
 MAINTENANCE_DECLINE_COMMENT = "Declined due to device maintenance."
+UNAVAILABLE_DECLINE_COMMENT = "Declined because the device became unavailable."
+BLOCKING_BOOKING_STATUSES = {"PENDING", "CONFIRMED", "CONFLICTING"}
+DEVICE_BLOCKING_STATUSES = {"Maintenance", "Unavailable"}
+MAX_DISCORD_MESSAGE_LEN = 1900
+MAX_DEVICE_LINES = 20
 
 @dataclass
 class MaintenanceNotification:
@@ -51,7 +56,181 @@ def _parse_maintenance_marker(value: str | None, *, is_end: bool) -> datetime | 
         return day.replace(hour=hour, minute=0, second=0, microsecond=0)
     except (ValueError, KeyError):
         return None
+
+def build_group_blocking_notifications(
+    *, 
+    affected_bookings: Iterable[models.Booking],
+    reason_status: str
+) -> list[MaintenanceNotification]:
+    grouped: dict[tuple[str, str], dict] = {}
+
+    normalized_reason = (reason_status or "").strip().lower()
+
+    for booking in affected_bookings:
+        user = booking.user
+        discord_id = user.discord_id if user else None
+        if not user or not discord_id or not booking.grouped_booking_id or not booking.device:
+            continue
+        
+        key = (booking.grouped_booking_id, discord_id)
+        entry = grouped.setdefault(
+            key,
+            {
+                "user": user,
+                "discord_id": discord_id,
+                "grouped_booking_id": booking.grouped_booking_id,
+                "devices": {},
+                "booking_ids": set(),
+                "collaborators": set()
+            }
+        )
+
+        device_key = (booking.device.deviceType, booking.device.deviceName)
+        device_entry = entry["devices"].setdefault(
+            device_key,
+            {"start": booking.start_time, "end": booking.end_time}
+        )
+        device_entry["start"] = min(device_entry["start"], booking.start_time)
+        device_entry["end"] = min(device_entry["end"], booking.end_time)
+
+        entry["booking_ids"].add(booking.booking_id)
+
+        for name in booking.collaborators or []:
+            if name and name != user.username:
+                entry["collaborators"].add(name)
+
+    notifications: list[MaintenanceNotification] = []
+
+    for entry in grouped.values():
+        user = entry["user"]
+        discord_id = entry["discord_id"]
+        mention = f"<@{discord_id}>"
+
+        if normalized_reason == "maintenance":
+            header_text = f":warning:{mention}, your booking was affected because one or more devicees entered maintenance. \n"
+        else:
+            header_text = f":warning:{mention}, your booking was affected because one or more devicees became unavailable. \n"
+
+        collab_info = ""
+        if entry["collaborators"]:
+            collab_str = ", ".join(sorted(entry["collaborators"]))
+            collab_info = f"< **Collaborative booking with: ** {collab_str}\n"
+        
+        header = (
+            f"{header_text}"
+            f"> Group Booking ID: **{entry['grouped_booking_id'][:8].upper()}**\n"
+            f"{collab_info}"
+        )
+
+        device_lines = []
+        for (device_type, device_name), times in sorted(entry["devices"].items()):
+            start_str = times["start"].strftime("%Y-%m-%d %H:%M")
+            end_str = times["end"].strftime("%Y-%m-%d %H:%M")
+            device_lines.append(
+                f"> Device: **{device_type} - {device_name}**: {start_str} - {end_str}"
+            )
+        
+        kept_lines = []
+        for idx, line in enumerate(device_lines):
+            remaining = len(device_lines) - (idx + 1)
+            suffix = f"\n> ...and {remaining} more affected device(s)." if remaining > 0 else ""
+            candidate_body = "\n".join(kept_lines + [line])
+            candidate_message = header + candidate_body + suffix
+
+            if len(candidate_message) > MAX_DISCORD_MESSAGE_LEN:
+                break
+            
+            kept_lines.append(line)
+
+        omitted = len(device_lines) - len(kept_lines)
+        devices_str = "\n".join(kept_lines)
+        if omitted > 0:
+            devices_str += f"\n> ... and {omitted} more affected device(s)."
+        
+        message = header + devices_str
+
+        notifications.append(
+            MaintenanceNotification(
+                user_id = user.id,
+                discord_id = discord_id,
+                booking_id = min(entry["booking_ids"]),
+                message = message
+            )
+        )
     
+    return notifications
+
+def apply_blocking_status_to_devices(db: Session, *, devices: Iterable[models.Device], reason_status: str, decline_status: str = 'DECLINED',) -> MaintenanceImpactResult:
+    device_list = list(devices)
+    if not device_list:
+        return MaintenanceImpactResult(
+            devices_updated=[],
+            affected_booking_ids=[],
+            affected_count=0,
+            notifications=[]
+        )
+    
+    normalized_reason = (reason_status or "").strip().lower()
+    if normalized_reason not in {"maintenance", "unavailable"}:
+        raise ValueError(f"Unsupported blocking status: {reason_status}")
+    
+    affected_bookings: dict[int, models.Booking] = {}
+    notifications: list[MaintenanceNotification] = []
+    now = datetime.now(IRELAND_TZ).replace(tzinfo=None)
+
+    for device in device_list:
+        rows = []
+
+        if normalized_reason == "maintenance":
+            window_start, window_end = maintenance_window_from_strings(device.maintenance_start, device.maintenance_end)
+
+            if not window_start or not window_end or window_end <= window_start:
+                continue
+            
+            rows = (
+                db.query(models.Booking)
+                .options(joinedload(models.Booking.user))
+                .filter(models.Booking.device_id == device.id)
+                .filter(models.Booking.status.in_(ACTIVE_BOOKING_STATUSES))
+                .filter(models.Booking.start_time < window_end)
+                .filter(models.Booking.end_time > window_start)
+                .all()
+            )
+
+            decline_comment = MAINTENANCE_DECLINE_COMMENT
+        # unavailable
+        else:
+            rows = (
+                db.query(models.Booking)
+                .options(joinedload(models.Booking.user))
+                .filter(models.Booking.device_id == device.id)
+                .filter(models.Booking.status.in_(ACTIVE_BOOKING_STATUSES))
+                .filter(models.Booking.end_time > now)
+                .all()
+            )
+
+            decline_comment = UNAVAILABLE_DECLINE_COMMENT
+        
+        for booking in rows:
+            if booking.booking_id in affected_bookings:
+                continue
+            
+            booking.status = decline_status
+            booking.comment = decline_comment
+            booking.status_updated_at = now
+            affected_bookings[booking.booking_id] = booking
+
+        notifications = build_group_blocking_notifications(affected_bookings=affected_bookings.values(), reason_status=reason_status)
+
+    return MaintenanceImpactResult(
+        devices_updated = [device.id for device in device_list],
+        affected_booking_ids = sorted(affected_bookings.keys()),
+        affected_count = len(affected_bookings),
+        notifications = notifications
+    )
+            
+            
+
 def maintenance_window_from_strings(
     maintenance_start: str | None,
     maintenance_end: str | None,
@@ -148,70 +327,12 @@ def apply_maintenance_to_devices(
     devices: Iterable[models.Device],
     decline_status: str = "DECLINED",
 ) -> MaintenanceImpactResult:
-    device_list = list(devices)
-    if not device_list:
-        return MaintenanceImpactResult(
-            devices_updated=[],
-            affected_booking_ids=[],
-            affected_count=0,
-            notifications=[]
-        )
-    
-    affected_bookings: dict[int, models.Booking] = {}
-    notifications: list[MaintenanceNotification] = []
-
-    for device in device_list:
-        window_start, window_end = maintenance_window_from_strings(
-            device.maintenance_start,
-            device.maintenance_end
-        )
-
-        if not window_start or not window_end or window_end <= window_start:
-            continue
-        
-        # print("MAINT DEBUG device", device.id, device.status, device.maintenance_start, device.maintenance_end)
-        # print("MAINT DEBUG window", window_start, window_end)
-
-        rows = (
-            db.query(models.Booking)
-            .filter(models.Booking.device_id == device.id)
-            .filter(models.Booking.status.in_(ACTIVE_BOOKING_STATUSES))
-            .filter(models.Booking.start_time < window_end)
-            .filter(models.Booking.end_time > window_start)
-            .all()
-        )
-
-        # print("MAINT DEBUG matched bookings", [b.booking_id for b in rows])
-
-        for booking in rows:
-            if booking.booking_id in affected_bookings:
-                continue
-            
-            booking.status = decline_status
-            booking.comment = MAINTENANCE_DECLINE_COMMENT
-            booking.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
-            affected_bookings[booking.booking_id] = booking
-
-            user = booking.user
-            notifications.append(
-                MaintenanceNotification(
-                    user_id=user.id,
-                    discord_id=user.discord_id,
-                    booking_id=booking.booking_id,
-                    message=build_maintenance_booking_message(
-                        user=user,
-                        booking=booking,
-                        device=device,
-                    ),
-                )
-            )
-    return MaintenanceImpactResult(
-        devices_updated=[device.id for device in device_list],
-        affected_booking_ids=sorted(affected_bookings.keys()),
-        affected_count=len(affected_bookings),
-        notifications=notifications,
+    return apply_blocking_status_to_devices(
+        db,
+        devices=devices,
+        reason_status="Maintenance",
+        decline_status=decline_status,
     )
-
 def sync_scheduled_maintenance_statuses(db: Session, *, at: datetime | None = None, default_return_status: str = "Available") -> MaintenanceImpactResult:
     check_at = (at or datetime.now(IRELAND_TZ)).replace(tzinfo=None)
     
@@ -246,7 +367,7 @@ def sync_scheduled_maintenance_statuses(db: Session, *, at: datetime | None = No
                 device.maintenance_return_status = None
             devices_updated.append(device.id)
         
-    maintenance_result = apply_maintenance_to_devices(db, devices=entering_devices)
+    maintenance_result = apply_blocking_status_to_devices(db, devices=entering_devices, reason_status="Maintenance")
 
     return MaintenanceImpactResult(
         devices_updated=sorted(set(devices_updated)),

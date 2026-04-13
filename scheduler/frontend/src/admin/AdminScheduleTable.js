@@ -260,6 +260,13 @@ export default function AdminScheduleTable() {
 
         // Check the device status 
         const device = devices.find(d => d.name === deviceType)?.subDevices.find(s => s.name === deviceName);
+        if (device?.status === 'Unavailable') {
+            return {
+                content: 'Unavailable',
+                className: 'time-slot maintenance-slot'
+            };
+        }
+        
         if (device?.status === 'Maintenance') {
             const maintenanceStart = parseMaintenanceTime(device.maintenance_start);
             const maintenanceEnd = parseMaintenanceTime(device.maintenance_end, true);
