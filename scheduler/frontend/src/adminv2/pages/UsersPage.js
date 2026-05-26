@@ -28,9 +28,10 @@ const ROLE_TABS = [
 const emptyInviteForm = {
   email: '',
   handle: '',
-  role: 'Viewer',
+  role: 'viewer',
   firstName: '',
   lastName: '',
+  discordId: '',
   password: '',
   note: '',
 };
@@ -77,6 +78,7 @@ export default function UsersPage() {
       role: inviteForm.role,
       firstName: inviteForm.firstName.trim(),
       lastName: inviteForm.lastName.trim(),
+      discord_id: inviteForm.discordId.trim(),
       password: inviteForm.password,
       notes: inviteForm.note?.trim() || undefined,
     });
@@ -234,6 +236,17 @@ export default function UsersPage() {
     },
   ], [approveInviteMutation, rejectInviteMutation]);
 
+  const invitationEmptyState = invitationQuery.isError ? (
+    <div className="border border-red-200 dark:border-red-900/60 rounded-xl bg-red-50 dark:bg-red-950/40 p-6 text-center">
+      <h3 className="text-sm font-semibold text-red-700 dark:text-red-200">
+        Unable to load invitations
+      </h3>
+      <p className="mt-2 text-sm text-red-600 dark:text-red-300">
+        {invitationQuery.error?.message || 'The invitations request failed.'}
+      </p>
+    </div>
+  ) : undefined;
+
   const filterChips = useMemo(() => {
     const chips = [];
     ROLE_TABS.forEach((tab) => {
@@ -390,6 +403,7 @@ export default function UsersPage() {
           rows={invitationQuery.data?.items || []}
           columns={invitationColumns}
           loading={invitationQuery.status === 'pending'}
+          emptyState={invitationEmptyState}
         />
       )}
         <Modal isOpen={isInviteOpen} 

@@ -678,7 +678,11 @@ export default function FiltersPanel({ userId, userName, onResetSelection, onHid
 
         {/* Templates Tab */}
         {activeTab === 'templates' && (
-          <BookingTemplates onApply={() => setActiveTab('search')} />
+          <BookingTemplates
+            userId={userId}
+            userName={userName}
+            onApply={() => setActiveTab('search')}
+          />
         )}
 
         {/* Patch List Tab */}

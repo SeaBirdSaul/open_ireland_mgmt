@@ -66,9 +66,11 @@ export default function BookingCartPanel({ userId, userName }) {
     const unique = new Set(selections.map((selection) => selection.date));
     return Array.from(unique).sort();
   }, [selections]);
-  const effectiveRangeStart = selectedRange.start || (selectionDates[0] ?? null);
+  const effectiveRangeStart = selectionDates[0] ?? selectedRange.start ?? null;
   const effectiveRangeEnd =
-    selectedRange.end || (selectionDates.length > 0 ? selectionDates[selectionDates.length - 1] : null);
+    selectionDates.length > 0
+      ? selectionDates[selectionDates.length - 1]
+      : selectedRange.end ?? null;
 
   useEffect(() => {
     if (!userName) {
@@ -185,7 +187,7 @@ export default function BookingCartPanel({ userId, userName }) {
     [summaryByType]
   );
 
-  const totalSelectedDays = selections.length;
+  const totalSelectedDays = selectionDates.length;
   const hasValidRange = Boolean(effectiveRangeStart && effectiveRangeEnd);
   const hasConflicts = conflicts.size > 0;
   const hasDevicesSelected = selectedDevices.length > 0;

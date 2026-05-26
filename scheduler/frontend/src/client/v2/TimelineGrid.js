@@ -97,7 +97,7 @@ function getCellClasses(cellState, inDragRange = false) {
     } else if (cellState === 'bookedConfirmed') {
         cellClasses += 'bg-gray-400 hover:bg-gray-500 border-gray-500 text-white cursor-not-allowed shadow-md pattern-diagonal-lines';
     } else if (cellState === 'bookedPending') {
-        cellClasses += 'bg-yellow-500 hover:bg-yellow-600 text-black cursor-pointer shadow-sm pattern-diagonal-lines';
+        cellClasses += 'cursor-pointer opacity-60 pattern-diagonal-lines';
     } else if (inDragRange) {
         cellClasses += 'cursor-pointer ring-2';
     } else {
@@ -189,9 +189,9 @@ function getCellStyle(cellState, inDragRange, bookedBg, bookedBorder) {
             }
             : cellState === 'bookedPending'
             ? {
-                backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`,
-                borderColor: `hsl(var(--accent-hue), var(--accent-saturation), calc(var(--accent-lightness) - 5%))`,
-                opacity: 0.6,
+                backgroundColor: bookedBg,
+                borderColor: bookedBorder,
+                transition: 'background-color 0.3s ease-in-out, border-color 0.3s ease-in-out',
             }
             : {}),
     };
@@ -625,6 +625,36 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
         }
     }, [selections, bookings, weekDays, getSelections, currentUserName]);
 
+    const isPendingBookingByOtherUser = useCallback((dayKey) => {
+        const bookingInfo = bookedDays.get(dayKey);
+        if (!bookingInfo) {
+            return false;
+        }
+
+        const statusKey = (bookingInfo.status || '').toUpperCase();
+        if (!PENDING_BOOKING_STATUSES.has(statusKey)) {
+            return false;
+        }
+
+        const ownerLower = (bookingInfo.ownerUsername || '').toLowerCase();
+        const currentUserLower = currentUserName ? currentUserName.toLowerCase() : null;
+        if (currentUserLower && ownerLower === currentUserLower) {
+            return false;
+        }
+
+        const collaborators = bookingInfo.collaborators || [];
+        if (
+            currentUserLower &&
+            collaborators.some(
+                (name) => typeof name === 'string' && name.toLowerCase() === currentUserLower
+            )
+        ) {
+            return false;
+        }
+
+        return true;
+    }, [bookedDays, currentUserName]);
+
     // Get cell state (available, selected, booked, conflicting, past, newlyConfirmed)
     const getCellState = useCallback(
         (deviceId, dateStr) => {
@@ -652,7 +682,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
             }
 
             if (isDaySelected(deviceId, dateStr)) {
-                if (conflicts.has(dayKey)) {
+                if (conflicts.has(dayKey) || isPendingBookingByOtherUser(dayKey)) {
                     return 'conflicting';
                 }
                 return 'selected';
@@ -689,7 +719,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
 
             return 'available';
         },
-        [isDaySelected, bookedDays, conflicts, isPastDate, getDayKey, newlyConfirmedDays, currentUserName, devices]
+        [isDaySelected, bookedDays, conflicts, isPastDate, getDayKey, newlyConfirmedDays, currentUserName, devices, isPendingBookingByOtherUser]
     );
 
     // Helper for selecting cells that are already booked
@@ -965,7 +995,7 @@ export default function TimelineGrid({ devices, selectedDate, bookings = [], cur
                         } else if (cellState === 'bookedConfirmed') {
                             cellClasses += 'bg-gray-500 hover:bg-gray-600 text-white cursor-not-allowed shadow-md pattern-diagonal-lines';
                         } else if (cellState === 'bookedPending') {
-                            cellClasses += 'bg-yellow-500 hover:bg-yellow-600 text-black cursor-pointer shadow-sm pattern-diagonal-lines';
+                            cellClasses += 'cursor-pointer opacity-60 pattern-diagonal-lines';
                         } else {
                             cellClasses += 'bg-neutral-100 dark:bg-neutral-800 cursor-pointer';
                         }

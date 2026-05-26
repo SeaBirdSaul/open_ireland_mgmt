@@ -59,11 +59,11 @@ export default function LogsPage() {
         header: 'Action',
         accessor: (row) => row.action,
       },
-      {
-        key: 'entity',
-        header: 'Entity',
-        render: (row) => (row.entity ? `${row.entity.type}:${row.entity.id}` : '—'),
-      },
+      // {
+      //   key: 'entity',
+      //   header: 'Entity',
+      //   render: (row) => (row.entity ? `${row.entity.type}:${row.entity.id}` : '—'),
+      // },
       {
         key: 'outcome',
         header: 'Outcome',

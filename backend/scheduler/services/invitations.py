@@ -8,10 +8,16 @@ from backend.scheduler import models
 # Timezone for Ireland
 IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
+def _is_invitation_expired(expires_at: datetime) -> bool:
+    now = datetime.now(IRELAND_TZ)
+    if expires_at.tzinfo is None:
+        return expires_at <= now.replace(tzinfo=None)
+    return expires_at <= now
+
 def _derive_status(inv: models.AdminInvitation) -> str:
     if inv.accepted_at:
         return "accepted"
-    if inv.expires_at <= datetime.now(IRELAND_TZ):
+    if _is_invitation_expired(inv.expires_at):
         return "expired"
     return "pending"
 
@@ -21,7 +27,7 @@ def accept_invitation_record(inv: models.AdminInvitation, db: Session) -> models
         raise HTTPException(status_code=404, detail="Invalid invitation token")
     if inv.accepted_at:
         raise HTTPException(status_code=409, detail="Invitation already accepted")
-    if inv.expires_at <= datetime.now(IRELAND_TZ):
+    if _is_invitation_expired(inv.expires_at):
         raise HTTPException(status_code=410, detail="Invitation expired")
 
     # gets registed handle or the start of the email address if no handle provided

@@ -988,6 +988,8 @@ function ClientV2Inner() {
           onClose={() => setAuthModal(null)}
           onSwitchMode={() => setAuthModal((prev) => (prev === 'login' ? 'register' : 'login'))}
           onForgotPassword={() => setAuthModal('forgotRequest')}
+          onOpenVerifyConfirm={() => setAuthModal('verifyConfirm')}
+          onOpenVerifyResend={() => setAuthModal('verifyResend')}
           onBackToLogin={() => setAuthModal('login')}
           onBackToResetRequest={() => setAuthModal('forgotRequest')}
           onBackToVerifyResend={() => setAuthModal('verifyResend')}
@@ -1006,7 +1008,7 @@ function ClientV2Inner() {
   );
 }
 
-function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogin, onBackToResetRequest, onBackToVerifyResend, onLogin, onRegister, onRequestReset, onConfirmReset, onVerifyConfirm, onVerifyResend, initialResetToken, initialVerifyToken, initialEmail, submitting }) {
+export function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onOpenVerifyConfirm, onOpenVerifyResend, onBackToLogin, onBackToResetRequest, onBackToVerifyResend, onLogin, onRegister, onRequestReset, onConfirmReset, onVerifyConfirm, onVerifyResend, initialResetToken, initialVerifyToken, initialEmail, submitting }) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -1226,6 +1228,9 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
               <button type="button" onClick={onForgotPassword} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
                 Forgot password?
               </button>
+              <button type="button" onClick={onOpenVerifyConfirm} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Verify email
+              </button>
               <button type="button" onClick={onSwitchMode} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
                 Register
               </button>
@@ -1245,6 +1250,26 @@ function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onBackToLogi
             <>
               <button type="button" onClick={onBackToResetRequest} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
                 Request new email
+              </button>
+              <button type="button" onClick={onBackToLogin} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+                Back to Sign in
+              </button>
+            </>
+          )}
+          {isVerifyResend && (
+            <>
+              <button type="button" onClick={onOpenVerifyConfirm} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Have a code?
+              </button>
+              <button type="button" onClick={onBackToLogin} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+                Back to Sign in
+              </button>
+            </>
+          )}
+          {isVerifyConfirm && (
+            <>
+              <button type="button" onClick={onOpenVerifyResend} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Resend code
               </button>
               <button type="button" onClick={onBackToLogin} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
                 Back to Sign in
@@ -1300,4 +1325,3 @@ function UnauthenticatedLanding({ onLogin, onRegister }) {
     </div>
   );
 }
-

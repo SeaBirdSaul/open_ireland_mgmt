@@ -1033,7 +1033,7 @@ def invite_user( payload: schemas.AdminUserInviteRequest, request: Request, db: 
     normalized_email = (payload.email or "").strip().lower() or None
 
     if normalized_email:
-        existing_email  = db.query(models.User).filter(models.User.email == normalized_email)
+        existing_email = db.query(models.User).filter(models.User.email == normalized_email).first()
         if existing_email:
             raise HTTPException(status_code=400, detail="Email is already in use.")
 
@@ -1041,7 +1041,7 @@ def invite_user( payload: schemas.AdminUserInviteRequest, request: Request, db: 
     sha_password = hashlib.sha256(payload.password.encode("utf-8")).hexdigest()
     hashed_password = hash_password(sha_password)
     inv = models.AdminInvitation(
-        email=payload.email,
+        email=normalized_email,
         firstName=payload.firstName.strip(),
         lastName=payload.lastName.strip(),
         handle=payload.handle.strip() if payload.handle else None,
