@@ -1,3 +1,7 @@
+/**
+ * PropertiesPanel component for displaying properties of a selected node or link.
+ * Shows either NodePropertiesPanel or LinkPropertiesPanel based on selection.
+ */
 import React from 'react';
 import NodePropertiesPanel from './NodePropertiesPanel';
 import LinkPropertiesPanel from './LinkPropertiesPanel';

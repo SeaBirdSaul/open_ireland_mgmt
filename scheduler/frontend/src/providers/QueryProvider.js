@@ -1,3 +1,7 @@
+/**
+ * QueryProvider component that sets up React Query with improved
+ * error handling for network issues and authentication errors.
+ */
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import useAuthStore from '../store/authStore';
@@ -30,12 +34,12 @@ const queryClient = new QueryClient({
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
       // Handle errors globally
       onError: (error) => {
+        const { authenticated } = useAuthStore.getState();
         // If it's a network error or 401/403, refresh auth to check session
         if (
           error?.message?.includes('fetch') ||
           error?.message?.includes('network') ||
-          error?.status === 401 ||
-          error?.status === 403
+          ((error?.status === 401 || error?.status === 403) && authenticated)
         ) {
           // Refresh auth to check if session is still valid
           useAuthStore.getState().refreshAuth();
@@ -47,11 +51,11 @@ const queryClient = new QueryClient({
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
       onError: (error) => {
         // Handle mutation errors similarly
+        const { authenticated } = useAuthStore.getState();
         if (
           error?.message?.includes('fetch') ||
           error?.message?.includes('network') ||
-          error?.status === 401 ||
-          error?.status === 403
+          ((error?.status === 401 || error?.status === 403) && authenticated)
         ) {
           useAuthStore.getState().refreshAuth();
         }

@@ -1,3 +1,8 @@
+/**
+ * NodePalette component for displaying a list of available device types.
+ * Each device type includes an icon, label, and description.
+ * Users can drag devices from the palette onto the canvas.
+ */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 

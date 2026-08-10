@@ -1,4 +1,6 @@
-
+'''
+Script to verify the unification of Device and InventoryDevice models after migration.
+'''
 import sys
 import logging
 from sqlalchemy import create_engine, select, func, text

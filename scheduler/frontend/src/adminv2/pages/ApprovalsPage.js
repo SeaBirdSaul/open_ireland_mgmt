@@ -1,3 +1,14 @@
+/**
+ * ApprovalsPage component for managing and triaging booking approvals.
+ * Supports filtering, bulk actions, and detailed preview of booking requests.
+ * Integrates with admin context for permissions and uses React Query for data fetching.
+ * Includes keyboard shortcuts for efficiency.
+ * Displays risk scores and conflict indicators for each booking request.
+ * Allows exporting the approval queue as a CSV file.
+ * Utilizes DataTable and FilterBar components for structured UI.
+ * Handles loading and empty states gracefully.
+ * Implements date range presets and custom date selection.
+ */
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -181,7 +192,7 @@ export default function ApprovalsPage() {
   const approveMutation = useMutation({
     mutationFn: (payload) => approveBookings(payload),
     onSuccess: async (result) => {
-      toast.success(`Approved ${result.succeeded.length} requests.`);
+      toast.success(`Approved ${result.updated.length} requests.`);
       await queryClient.invalidateQueries({ queryKey: ['admin-approvals'] });
       selection.clear();
     },
@@ -191,7 +202,7 @@ export default function ApprovalsPage() {
   const declineMutation = useMutation({
     mutationFn: (payload) => declineBookings(payload),
     onSuccess: async (result) => {
-      toast.success(`Declined ${result.succeeded.length} requests.`);
+      toast.success(`Declined ${result.updated.length} requests.`);
       await queryClient.invalidateQueries({ queryKey: ['admin-approvals'] });
       selection.clear();
     },

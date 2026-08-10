@@ -1,3 +1,7 @@
+/**
+ * The main shell component for the admin interface.
+ * It includes the header, sidebar navigation, and main content area.
+ */
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/authStore';
@@ -23,7 +27,7 @@ const NAV_ITEMS = [
 export default function AdminShell() {
     const location = useLocation();
     const navigate = useNavigate();
-    const { username, isAdmin, clearAuth } = useAuthStore();
+    const { username, role , clearAuth } = useAuthStore();
     const { isPrioritySeason, setPrioritySeason, initialize: initAdminStore } = useAdminStore();
 
     // Track window size for responsive behavior

@@ -1,3 +1,13 @@
+/**
+ * Customizes the Create React App webpack configuration to:
+ * 1. Prioritize .jsx file resolution over .js files.
+ * 2. Add an alias '@tcdona/ui' pointing to the local packages/ui/src directory.
+ * 3. Modify module rules to properly handle imports from the packages/ui package,
+ *    ensuring it is transpiled by Babel and not excluded by other rules.
+ *
+ * This setup allows seamless integration of the shared UI components
+ *    from the packages/ui package into the inventory/frontend application.
+ */
 const path = require('path');
 
 module.exports = function override(config, env) {

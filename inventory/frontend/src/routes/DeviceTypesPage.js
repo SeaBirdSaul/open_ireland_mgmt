@@ -1,3 +1,8 @@
+/**
+ * Page for managing device types in the inventory system.
+ * Allows viewing, creating, editing, and deleting device types.
+ * Utilizes custom hooks for data fetching and mutations.
+ */
 import React, { useState, useMemo, useCallback } from 'react';
 import { PageHeader, Button, Card, Table, Modal, Alert } from '@tcdona/ui';
 import { useDeviceTypes, useCreateDeviceType, useUpdateDeviceType, useDeleteDeviceType } from '../hooks/useInventoryData';

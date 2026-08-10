@@ -1,4 +1,7 @@
-// TODO: Implement component (placeholder)
+// Button component with multiple variants and sizes
+// Accepts props: children (button label), variant (string), size (string), onClick (function), disabled (boolean), loading (boolean), className (string)
+// Variants include: primary, secondary, danger, ghost
+// Sizes include: sm, md, lg
 import React from 'react';
 import clsx from 'clsx';
 

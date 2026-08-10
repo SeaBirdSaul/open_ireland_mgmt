@@ -1,3 +1,7 @@
+/**
+ * Provides hooks for managing devices in the inventory system.
+ * Includes listing, fetching, creating, updating, deleting, and bulk operations.
+ */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     fetchDevices,
@@ -8,6 +12,7 @@ import {
     bulkUpdateDevices,
     fetchDeviceHistory,
     fetchDeviceTags,
+    fetchDeviceTypes,
     assignTagsToDevice,
     removeTagFromDevice,
 } from '../api/inventoryApi';
@@ -52,6 +57,62 @@ export function useDevice(deviceId) {
         enabled: !!deviceId,
     });
 }
+
+// Hook for getting total device count
+export function useDeviceCount() {
+    return useQuery({
+        queryKey: ['deviceCount'],
+        queryFn: () => fetchDevices({ limit: 1 }).then((data) => data.total),
+    });
+}
+
+// Hook for getting total device count by status
+export function useDevicesByStatus(status = 'Available') {
+    return useQuery({
+        queryKey: ['deviceCount', 'status', status],
+        queryFn: () => fetchDevices({ status, limit: 1 }).then((data) => data.total),
+        enabled: !!status,
+    });
+}
+
+// Hook for getting total device count by type
+export function useDevicesByTypes(types = []) {
+    return useQuery({
+        queryKey: ['deviceCount', 'device_type_id', types],
+        queryFn: async () => {
+            const results = await Promise.all(
+                types.map((type)=> 
+                    fetchDevices({ device_type_id: type, limit:1 }).then((data) => data.total)
+                )
+            );
+            return types.reduce((acc, type, idx) => {
+                acc[type] = results[idx];
+                return acc;
+            }, {});
+        },
+        enabled: types.length > 0,
+    });
+}
+
+// Hook for getting total device count by site
+export function useDevicesBySite(sites = []) {
+    return useQuery({
+        queryKey: ['deviceCount', 'site_id', sites],
+        queryFn: async () => {
+            const results = await Promise.all(
+                sites.map((site)=> 
+                    fetchDevices({ site_id: site, limit:1 }).then((data) => data.total)
+                )
+            );
+            return sites.reduce((acc, site, idx) => {
+                acc[site] = results[idx];
+                return acc;
+            }, {});
+        },
+        enabled: sites.length > 0,
+    });
+}
+
 
 // Hook for creating a device
 export function useCreateDevice() {
@@ -141,4 +202,3 @@ export function useRemoveTagFromDevice(deviceId) {
         },
     });
 }
-

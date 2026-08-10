@@ -1,3 +1,8 @@
+/**
+ * The schedule table component for the admin interface.
+ * It displays device reservations in a weekly view, allowing admins to see bookings,
+ *       manage device statuses, and handle conflicts.
+ */
 import React, { useState, useEffect, useCallback } from 'react';
 import '../App.css';
 import './admin.css';
@@ -255,6 +260,13 @@ export default function AdminScheduleTable() {
 
         // Check the device status 
         const device = devices.find(d => d.name === deviceType)?.subDevices.find(s => s.name === deviceName);
+        if (device?.status === 'Unavailable') {
+            return {
+                content: 'Unavailable',
+                className: 'time-slot maintenance-slot'
+            };
+        }
+        
         if (device?.status === 'Maintenance') {
             const maintenanceStart = parseMaintenanceTime(device.maintenance_start);
             const maintenanceEnd = parseMaintenanceTime(device.maintenance_end, true);

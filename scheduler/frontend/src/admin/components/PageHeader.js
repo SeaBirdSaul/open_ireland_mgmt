@@ -1,3 +1,7 @@
+/**
+ * A reusable page header component for the admin interface.
+ * Supports title, subtitle, action buttons, and breadcrumb navigation.
+ */
 import React from 'react';
 import { Link } from 'react-router-dom';
 

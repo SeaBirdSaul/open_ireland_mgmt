@@ -1,3 +1,8 @@
+/**
+ * LogsPage component for admin interface.
+ * Displays system logs with filtering options.
+ * Supports filtering by action, actor, scope, and date range.
+ */
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
@@ -42,23 +47,23 @@ export default function LogsPage() {
       {
         key: 'timestamp',
         header: 'Time',
-        render: (row) => formatDateTime(row.timestamp),
+        render: (row) => formatDateTime(row.created_at),
       },
       {
         key: 'actor',
         header: 'Actor',
-        render: (row) => row.actor?.name || 'System',
+        render: (row) => row.actor?.name || row.actor?.username || row.actor || 'System',
       },
       {
         key: 'action',
         header: 'Action',
         accessor: (row) => row.action,
       },
-      {
-        key: 'entity',
-        header: 'Entity',
-        render: (row) => (row.entity ? `${row.entity.type}:${row.entity.id}` : '—'),
-      },
+      // {
+      //   key: 'entity',
+      //   header: 'Entity',
+      //   render: (row) => (row.entity ? `${row.entity.type}:${row.entity.id}` : '—'),
+      // },
       {
         key: 'outcome',
         header: 'Outcome',

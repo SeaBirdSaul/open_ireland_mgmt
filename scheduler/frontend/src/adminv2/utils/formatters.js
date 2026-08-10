@@ -1,3 +1,7 @@
+/**
+ * Utility functions for formatting dates, numbers, and deltas.
+ * Uses dayjs for date formatting.
+ */
 import dayjs from 'dayjs';
 
 export function formatDateTime(value, pattern = 'MMM D, YYYY HH:mm') {

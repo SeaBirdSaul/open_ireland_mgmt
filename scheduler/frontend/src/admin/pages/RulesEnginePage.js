@@ -1,3 +1,7 @@
+/**
+ * Page for configuring the rules engine in the admin interface.
+ * Allows admins to create, edit, and manage automated approval and scheduling rules.
+ */
 import React from 'react';
 import PageHeader from '../components/PageHeader';
 

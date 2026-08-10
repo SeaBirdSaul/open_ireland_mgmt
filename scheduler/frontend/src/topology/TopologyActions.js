@@ -1,3 +1,7 @@
+/**
+ * TopologyActions component for managing topology actions such as
+ * naming, saving, loading, checking availability, resolving, and booking.
+ */
 import React, { useState } from 'react';
 import dayjs from 'dayjs';
 

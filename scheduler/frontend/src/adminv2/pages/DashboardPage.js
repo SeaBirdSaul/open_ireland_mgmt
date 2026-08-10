@@ -1,3 +1,10 @@
+/**
+ * DashboardPage component for the admin interface.
+ * Displays key metrics, recent activity, and alerts.
+ * Utilizes React Query for data fetching and state management.
+ * Integrates with routing for navigation to detailed views.
+ * Includes StatCard, ActivityFeed, DeviceHealthPanel, and AlertsPanel components.
+ */
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -36,6 +43,7 @@ export default function DashboardPage() {
     }
     const pendingCard = cards.find((card) => card.id === 'pending_approvals');
     const slaCard = cards.find((card) => card.id === 'sla_breaches');
+    const conflictCard = cards.find((card) => card.id === 'active_conflicts');
     return [
       {
         id: 'approvals',
@@ -49,9 +57,9 @@ export default function DashboardPage() {
       {
         id: 'conflicts',
         label: 'Active conflicts',
-        value: topologyConflicts.length,
+        value: conflictCard?.value ?? 0,
         delta: 0,
-        trend: topologyConflicts.map((conflict) => conflict.conflict_count),
+        trend: conflictCard?.sparkline || [conflictCard?.value ?? 0],
         href: () => navigate('/admin/approvals?conflictOnly=1'),
         hint: 'Require resolution',
       },

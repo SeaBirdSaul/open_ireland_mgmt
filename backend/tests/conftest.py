@@ -3,6 +3,7 @@ Pytest configuration and fixtures for backend tests
 """
 import os
 import sys
+from fastapi.testclient import TestClient
 
 # IMPORTANT: Set test DATABASE_URL before importing database.py
 # database.py requires DATABASE_URL at import time, but tests override it anyway
@@ -10,6 +11,13 @@ import sys
 if not os.getenv("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
+# Ensure uploads go to a writable test directory during tests
+# Some modules create the upload directory at import time (inventory/router.py),
+# so set and create a test-local upload dir before importing application modules.
+if not os.getenv("UPLOAD_DIR"):
+    upload_dir = os.path.join(os.path.dirname(__file__), "test_uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    os.environ["UPLOAD_DIR"] = upload_dir
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -21,7 +29,10 @@ from backend.core.database import Base, SessionLocal
 from backend.main import app
 from backend.core.deps import get_db
 from backend.scheduler.routers.admin import router as admin_router
-from backend.scheduler.routers.admin_v2 import router as admin_v2_router
+try:
+    from backend.scheduler.routers.admin_v2 import router as admin_v2_router
+except Exception:
+    admin_v2_router = None
 from backend.scheduler.routers.control_panel import router as control_panel_router
 from backend.scheduler.models import User, Device, Booking
 from backend.core.hash import hash_password
@@ -31,6 +42,9 @@ from backend.core.hash import hash_password
 # metadata is registered before Base.metadata.create_all() in db_session fixture
 from backend.inventory import models as inventory_models  # noqa: F401
 from backend.inventory.router import get_db as inventory_get_db
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 
 # Safety check: Ensure we're not accidentally using production database
@@ -120,9 +134,12 @@ def test_user(db_session):
     hashed_password = hash_password("testpassword123")
     user = User(
         username="testuser",
+        firstName="Test",
+        lastName="User",
         email="test@example.com",
         password=hashed_password,
-        is_admin=False,
+        role="viewer",
+        status="active",
         discord_id="123456789"
     )
     db_session.add(user)
@@ -137,9 +154,12 @@ def test_admin(db_session):
     hashed_password = hash_password("adminpassword123")
     admin = User(
         username="testadmin",
+        firstName="Test",
+        lastName="Admin",
         email="admin@example.com",
         password=hashed_password,
-        is_admin=True,
+        role="admin",
+        status="active",
         discord_id="987654321"
     )
     db_session.add(admin)
@@ -168,7 +188,7 @@ def test_device(db_session):
 @pytest.fixture
 def test_booking(db_session, test_user, test_device):
     """Create a test booking"""
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     booking = Booking(

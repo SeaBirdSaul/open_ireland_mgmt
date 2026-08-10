@@ -1,3 +1,10 @@
+'''
+Defines control panel APIs for managing Raritan PDUs, including adding, deleting, connecting to PDUs,
+reading sensor data, controlling outlets, and retrieving system statistics.
+Uses http://10.10.10.8:8001/model/pdu external API for certain operations.
+
+'''
+
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -5,11 +12,15 @@ import yaml
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-import requests 
+import requests
+import pytz
 
 from backend.scheduler.routers.admin import admin_required  
 from backend.core.deps import get_db
 from backend.scheduler.schemas import PDUCreate, PDUResponse, OutletControl, SensorData, Sensor
+
+# Timezone for Ireland
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 # Raritan SDK 
 from raritan import rpc
@@ -267,7 +278,7 @@ def get_pdu_power(pdu_name: str, auth: None = Depends(admin_required)):
         
         if power is not None:
             pdu_config['power'] = power
-            pdu_config['last_updated'] = datetime.now().isoformat()
+            pdu_config['last_updated'] = datetime.now(IRELAND_TZ).isoformat()
             save_config(config)
             
             return {"power": power, "unit": "Watt"}
@@ -292,7 +303,7 @@ def connect_pdu(pdu_name: str, auth: None = Depends(admin_required)):
         controller = PduController.get_pdu_controller(pdu_name)
         
         pdu_config['connected'] = True
-        pdu_config['last_updated'] = datetime.now().isoformat()
+        pdu_config['last_updated'] = datetime.now(IRELAND_TZ).isoformat()
         
         power = controller.get_power()
         if power is not None:
@@ -304,7 +315,7 @@ def connect_pdu(pdu_name: str, auth: None = Depends(admin_required)):
     except Exception as e:
         if pdu_config:
             pdu_config['connected'] = False
-            pdu_config['last_updated'] = datetime.now().isoformat()
+            pdu_config['last_updated'] = datetime.now(IRELAND_TZ).isoformat()
             save_config(config)
             
         logger.error(f"Failed to connect to PDU: {e}")
@@ -347,7 +358,7 @@ def add_pdu(pdu: PDUCreate, auth: None = Depends(admin_required)):
         'temperature': None,
         'humidity': None,
         'power': None,  
-        'last_updated': datetime.now().isoformat()
+        'last_updated': datetime.now(IRELAND_TZ).isoformat()
     }
     
     config.setdefault('pdus', []).append(new_pdu)
@@ -370,7 +381,7 @@ def add_pdu(pdu: PDUCreate, auth: None = Depends(admin_required)):
             # Get power data
             new_pdu['power'] = controller.get_power()
             
-            new_pdu['last_updated'] = datetime.now().isoformat()
+            new_pdu['last_updated'] = datetime.now(IRELAND_TZ).isoformat()
             save_config(config)
         except Exception as e:
             logger.warning(f"Auto-connect failed for new PDU {pdu.name}: {e}")
@@ -424,7 +435,7 @@ def get_pdu_sensors(pdu_name: str, auth: None = Depends(admin_required)):
         pdu_config['temperature'] = temperature
         pdu_config['humidity'] = humidity
         pdu_config['power'] = power
-        pdu_config['last_updated'] = datetime.now().isoformat()
+        pdu_config['last_updated'] = datetime.now(IRELAND_TZ).isoformat()
         save_config(config)
 
         return {
@@ -436,7 +447,7 @@ def get_pdu_sensors(pdu_name: str, auth: None = Depends(admin_required)):
     except Exception as e:
         if pdu_config:
             pdu_config['connected'] = False
-            pdu_config['last_updated'] = datetime.now().isoformat()
+            pdu_config['last_updated'] = datetime.now(IRELAND_TZ).isoformat()
             save_config(config)
             
         logger.error(f"Failed to read sensor: {e}")
@@ -480,7 +491,7 @@ def control_pdu_outlet(
         # Update the power
         pdu_config['power'] = controller.get_power()
         
-        pdu_config['last_updated'] = datetime.now().isoformat()
+        pdu_config['last_updated'] = datetime.now(IRELAND_TZ).isoformat()
         save_config(config)
         
         return {
@@ -596,7 +607,7 @@ def update_outlet_device_name(
         outlet_config['device_name'] = device_data.get('device_name', 'Unknown Device')
         
         # Update timestamp
-        pdu_config['last_updated'] = datetime.now().isoformat()
+        pdu_config['last_updated'] = datetime.now(IRELAND_TZ).isoformat()
         save_config(config)
         
         return {

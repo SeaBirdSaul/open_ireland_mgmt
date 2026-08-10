@@ -1,3 +1,7 @@
+/**
+ * Zustand store for managing admin search state.
+ * Includes search query, scope, suggestions, and open/close state.
+ */
 import { create } from 'zustand';
 
 const SCOPES = ['bookings', 'devices', 'users', 'topologies', 'logs'];

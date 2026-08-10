@@ -12,7 +12,7 @@ export const handlers = [
       id: 1,
       username: 'testuser',
       email: 'test@example.com',
-      is_admin: false
+      role: 'viewer'
     }));
   }),
 

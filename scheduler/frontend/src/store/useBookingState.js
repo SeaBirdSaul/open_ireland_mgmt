@@ -1,4 +1,10 @@
+/**
+ * Zustand store for managing booking state, including selected date ranges,
+ * devices, slots, and collaborators. Persists selections to localStorage
+ * and provides utility functions to manipulate and retrieve selections.
+ */
 import { create } from 'zustand';
+import { parseLocalDate, formatLocalDateKey, addDaysLocal } from '../client/v2/utils/localDate';
 
 const SELECTION_STORAGE_KEY = 'scheduler_device_selection';
 
@@ -104,20 +110,20 @@ const getDatesInRange = (start, end) => {
     return [];
   }
 
-  const startDate = new Date(start);
-  const endDate = new Date(end);
+  const startDate = parseLocalDate(start);
+  const endDate = parseLocalDate(end);
   if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
     return [];
   }
 
   const dates = [];
-  const current = new Date(startDate);
+  let current = new Date(startDate);
   current.setHours(0, 0, 0, 0);
   endDate.setHours(0, 0, 0, 0);
 
   while (current <= endDate) {
-    dates.push(current.toISOString().split('T')[0]);
-    current.setDate(current.getDate() + 1);
+    dates.push(formatLocalDateKey(current));
+    current = addDaysLocal(current, 1);
   }
 
   return dates;

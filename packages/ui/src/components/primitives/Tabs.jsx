@@ -1,4 +1,6 @@
-// TODO: Implement component (placeholder)
+// Tabs component for switching between different views
+// Accepts props: tabs (array of { key, label, content }), activeTab (string), onTabChange (function)
+// Renders tab buttons and the content of the active tab
 import React from 'react';
 import clsx from 'clsx';
 

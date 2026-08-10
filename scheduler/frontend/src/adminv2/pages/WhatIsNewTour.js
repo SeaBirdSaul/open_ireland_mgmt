@@ -1,3 +1,9 @@
+/**
+ * WhatIsNewTour component for admin interface.
+ * Displays a "What's New" tour highlighting new features.
+ * Remembers dismissal state using local storage.
+ * Includes a button to dismiss the tour.
+ */
 import React, { useEffect, useState } from 'react';
 
 const STORAGE_KEY = 'admin-v2-whats-new-dismissed';

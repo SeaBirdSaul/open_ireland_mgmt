@@ -1,4 +1,6 @@
-
+'''
+Script to verify the /bookings/for-week query against the database.
+'''
 import sys
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine

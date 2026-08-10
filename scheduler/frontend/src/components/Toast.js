@@ -1,3 +1,7 @@
+/**
+ * Toast notification component with support for different types,
+ * auto-dismissal, and accessibility features.
+ */
 import React, { useEffect } from 'react';
 
 export function Toast({ message, type = 'info', onClose, duration = 5000 }) {

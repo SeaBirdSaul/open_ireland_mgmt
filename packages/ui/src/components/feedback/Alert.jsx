@@ -1,4 +1,6 @@
-// TODO: Implement component (placeholder)
+
+// Displays alert messages of various types (info, success, warning, error)
+// Accepts props: children (content), type (string), title (string), onClose (function), className (string)
 import React from 'react';
 import clsx from 'clsx';
 

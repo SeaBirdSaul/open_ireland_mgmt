@@ -1,8 +1,9 @@
 
+# Test login functionality of the management server.
 import requests
 import sys
 
-URL = "http://localhost:25001/login"
+URL = "http://localhost:20001/login"
 # You might need to adjust these credentials based on your seed data
 CREDENTIALS = {
     "username": "admin",

@@ -1,3 +1,8 @@
+/**
+ * index.css
+ * Global styles for the inventory frontend application.
+ * Sets up base styles, full height and width for html, body, and root elements.
+ */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

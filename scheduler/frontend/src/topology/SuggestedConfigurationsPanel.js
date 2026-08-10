@@ -1,3 +1,8 @@
+/**
+ * SuggestedConfigurationsPanel component for displaying recommended network configurations.
+ * Each recommendation includes a score breakdown, rationale, earliest available slot,
+ * and a summary of devices and links. Users can select a recommendation to apply.
+ */
 import React from 'react';
 
 export default function SuggestedConfigurationsPanel({ recommendations, onSelectRecommendation, selectedMappingId }) {

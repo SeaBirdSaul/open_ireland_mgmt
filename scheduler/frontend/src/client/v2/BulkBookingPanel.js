@@ -1,3 +1,9 @@
+/**
+ * Enables bulk booking mode where users can select multiple devices
+ * and a date range to add to their booking cart in one action.
+ * Integrates with global booking state and device data.
+ * Provides UI for selecting devices by type and date range.
+ */
 import React, { useMemo } from 'react';
 import { useDevices } from '../../services/deviceService';
 import useSchedulerStore from '../../store/schedulerStore';

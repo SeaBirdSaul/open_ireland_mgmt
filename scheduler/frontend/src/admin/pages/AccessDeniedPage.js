@@ -1,3 +1,7 @@
+/**
+ * Page displayed when a user tries to access an admin-only page 
+ *    without sufficient permissions.
+ */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 

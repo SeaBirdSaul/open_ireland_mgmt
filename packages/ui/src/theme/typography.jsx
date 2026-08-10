@@ -1,4 +1,5 @@
-// TODO: Implement typography theme (placeholder)
+// Typography definitions for the UI theme
+// Defines font families and sizes used throughout the UI 
 export const typography = {
   fontFamily: {
     sans: [

@@ -1,10 +1,13 @@
+'''
+Test database connection to MySQL using SQLAlchemy.
+'''
 from sqlalchemy import create_engine, text
 import os
 import sys
 
 # Connection string
 # Correctly URL-encoded password if needed, but here simple replacement
-DATABASE_URL = "mysql+pymysql://openireland:ChangeMe_Dev123%21@10.10.10.4:3306/provdb_dev"
+DATABASE_URL = "mysql+pymysql://murphe83:password@10.10.10.4:3306/provdb_dev"
 
 print(f"Testing connection to: {DATABASE_URL}")
 

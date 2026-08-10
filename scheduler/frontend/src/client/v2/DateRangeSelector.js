@@ -1,5 +1,11 @@
+/**
+ * DateRangeSelector component allows users to select predefined or custom date ranges
+ * for booking devices. It persists user preferences in local storage and updates
+ * the global booking state accordingly.
+ */
 import React, { useMemo } from 'react';
 import useBookingState from '../../store/useBookingState';
+import { parseLocalDate, formatLocalDateKey, addDaysLocal } from './utils/localDate';
 
 const DATE_PREFERENCE_STORAGE_KEY = 'scheduler_date_preference';
 
@@ -54,22 +60,22 @@ export default function DateRangeSelector({ ui, setDateRange, setWeekOffset }) {
     return [
       {
         label: 'This Week',
-        start: currentWeek.toISOString().split('T')[0],
+        start: formatLocalDateKey(currentWeek),
         end: new Date(currentWeek.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       },
       {
         label: 'Next Week',
-        start: nextWeek.toISOString().split('T')[0],
+        start: formatLocalDateKey(nextWeek),
         end: new Date(nextWeek.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       },
       {
         label: '2 Weeks',
-        start: currentWeek.toISOString().split('T')[0],
+        start: formatLocalDateKey(currentWeek),
         end: new Date(twoWeeks.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       },
       {
         label: '1 Month',
-        start: currentWeek.toISOString().split('T')[0],
+        start: formatLocalDateKey(currentWeek),
         end: new Date(month.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       },
     ];
@@ -193,12 +199,12 @@ export default function DateRangeSelector({ ui, setDateRange, setWeekOffset }) {
         {hasRange ? (
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Selected:{' '}
-            {new Date(ui.dateRange.start).toLocaleDateString('en-US', {
+            {parseLocalDate(ui.dateRange.start).toLocaleDateString('en-US', {
               month: 'short',
               day: 'numeric',
             })}{' '}
             –{' '}
-            {new Date(ui.dateRange.end).toLocaleDateString('en-US', {
+            {parseLocalDate(ui.dateRange.end).toLocaleDateString('en-US', {
               month: 'short',
               day: 'numeric',
               year: 'numeric',

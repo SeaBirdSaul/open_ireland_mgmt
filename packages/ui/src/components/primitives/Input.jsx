@@ -1,4 +1,6 @@
-// TODO: Implement component (placeholder)
+// Input component for user text input
+// Accepts props: type (string), placeholder (string), value (string), onChange (function), error (string), label (string), className (string)
+// Supports error display and custom styling
 import React from 'react';
 import clsx from 'clsx';
 

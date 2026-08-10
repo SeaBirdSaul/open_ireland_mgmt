@@ -1,4 +1,6 @@
-// TODO: Implement component (placeholder)
+// Select component for choosing an option from a dropdown list
+// Accepts props: options (array of { value, label }), value (string), onChange (function), placeholder (string), label (string), className (string), error (string)
+// Supports error display and custom styling
 import React from 'react';
 import clsx from 'clsx';
 

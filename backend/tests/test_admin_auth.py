@@ -4,7 +4,7 @@ Tests for admin authentication endpoints
 import pytest
 import os
 from unittest.mock import patch
-from models import User
+from backend.scheduler.models import User
 import importlib
 
 
@@ -13,7 +13,7 @@ def test_admin_registration_success(client, db_session, monkeypatch):
     monkeypatch.setenv("ADMIN_SECRET", "test_secret_key")
     # Reload admin module to pick up new env var
     import importlib
-    import admin
+    import backend.scheduler.routers.admin as admin
     importlib.reload(admin)
     
     response = client.post(
@@ -30,14 +30,14 @@ def test_admin_registration_success(client, db_session, monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["username"] == "newadmin"
-    assert data["is_admin"] is True
+    assert data["role"] == "admin"
 
 
 def test_admin_registration_invalid_secret(client, monkeypatch):
     """Test admin registration with invalid secret"""
     monkeypatch.setenv("ADMIN_SECRET", "correct_secret")
     import importlib
-    import admin
+    import backend.scheduler.routers.admin as admin
     importlib.reload(admin)
     
     response = client.post(

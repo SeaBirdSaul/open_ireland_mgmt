@@ -1,3 +1,7 @@
+/**
+ * Displays the user's bookings with options for dark mode and particle effects.
+ * Integrates accessibility features and allows navigation back to the main scheduler.
+ */
 import React, { useEffect, useState, lazy, Suspense, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MyBookingsPanel from './v2/MyBookingsPanel';

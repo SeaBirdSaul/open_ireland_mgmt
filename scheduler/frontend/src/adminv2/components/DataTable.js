@@ -1,3 +1,7 @@
+/**
+ * DataTable component for displaying tabular data with optional selection and bulk actions.
+ * Supports loading state and empty state handling.
+ */
 import React from 'react';
 
 function HeaderCell({ column }) {
@@ -66,7 +70,7 @@ export default function DataTable({
   }
 
   return (
-    <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-sm">
+    <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-x-auto bg-white dark:bg-gray-950 shadow-sm">
       {bulkActions && selection?.state.count > 0 && (
         <div className="bg-blue-50 dark:bg-blue-900/40 border-b border-blue-100 dark:border-blue-800 px-4 py-3 flex items-center justify-between">
           <div className="text-sm font-semibold text-blue-600 dark:text-blue-200">
@@ -123,7 +127,12 @@ export default function DataTable({
                 ]
                   .filter(Boolean)
                   .join(' ')}
-                onClick={() => onRowClick?.(row)}
+                onClick={(event) => {
+                  if (event.target.type === 'checkbox') {
+                    return;
+                  }
+                  onRowClick?.(row);
+                }}
               >
                 {hasSelection && (
                   <td className="px-4 py-3">

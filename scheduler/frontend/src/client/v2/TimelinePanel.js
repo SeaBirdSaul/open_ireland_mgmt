@@ -1,9 +1,14 @@
+/**
+ * Timeline panel component for displaying devices and their bookings in a timeline view.
+ * Supports filtering, searching, and grouping of devices.
+ */
 import React, { useMemo, useEffect, useState } from 'react';
 import Fuse from 'fuse.js';
 import { useDevices } from '../../services/deviceService';
 import { useBookingsWithAdjacentWeeks, useBookingsForRange } from '../../services/bookingService';
 import useSchedulerStore from '../../store/schedulerStore';
 import TimelineGrid from './TimelineGrid';
+import { formatLocalDateKey } from './utils/localDate';
 
 export default function TimelinePanel({ userName }) {
   const { data: devices = [], isLoading, error } = useDevices();
@@ -30,13 +35,13 @@ export default function TimelinePanel({ userName }) {
 
   // Update weekStart in store when currentWeekStart changes
   useEffect(() => {
-    const weekStartStr = currentWeekStart.toISOString().split('T')[0];
+    const weekStartStr = formatLocalDateKey(currentWeekStart)
     setWeekStart(weekStartStr);
   }, [currentWeekStart, setWeekStart]);
 
   // Get selected date (use Monday of current week)
   const selectedDate = currentWeekStart;
-  const weekStart = currentWeekStart.toISOString().split('T')[0];
+  const weekStart = formatLocalDateKey(currentWeekStart)
 
   // Fetch bookings - use range if set, otherwise use week
   const {
@@ -163,25 +168,19 @@ export default function TimelinePanel({ userName }) {
           maintenance_end: device.maintenance_end,
         };
       } else {
-        // Add this device's ID to the group
         groupedByTypeAndName[key].ids.push(device.id);
-        
-        // Status logic: If any device is Maintenance, the group shows Maintenance
-        // Otherwise, if any device is Available, the group shows Available
-        // Priority: Maintenance > Available > other statuses
-        if (device.status === 'Maintenance') {
-          groupedByTypeAndName[key].status = 'Maintenance';
-        } else if (device.status === 'Available' && groupedByTypeAndName[key].status !== 'Maintenance') {
-          groupedByTypeAndName[key].status = 'Available';
+
+        if (!groupedByTypeAndName[key].status) {
+          groupedByTypeAndName[key].status = device.status;
         }
-        
-        // Merge maintenance windows if needed (use earliest start, latest end)
-        if (device.maintenance_start && (!groupedByTypeAndName[key].maintenance_start || 
-            device.maintenance_start < groupedByTypeAndName[key].maintenance_start)) {
+
+        if (
+          device.maintenance_start &&
+          device.maintenance_end &&
+          !groupedByTypeAndName[key].maintenance_start &&
+          !groupedByTypeAndName[key].maintenance_end
+        ) {
           groupedByTypeAndName[key].maintenance_start = device.maintenance_start;
-        }
-        if (device.maintenance_end && (!groupedByTypeAndName[key].maintenance_end || 
-            device.maintenance_end > groupedByTypeAndName[key].maintenance_end)) {
           groupedByTypeAndName[key].maintenance_end = device.maintenance_end;
         }
       }

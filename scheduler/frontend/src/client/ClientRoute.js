@@ -1,3 +1,8 @@
+/**
+ * Client Route Component
+ * Determines which version of the client to render.
+ * Currently defaults to ClientV2.
+ */
 import React from 'react';
 import ClientV2 from './ClientV2';
 

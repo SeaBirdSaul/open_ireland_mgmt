@@ -1,3 +1,7 @@
+/**
+ * API utility functions for the admin interface.
+ * Includes functions for making requests to admin endpoints.
+ */
 import { API_BASE_URL } from '../config/api';
 
 const DEFAULT_HEADERS = {
@@ -87,6 +91,13 @@ export function declineBookings(payload) {
   });
 }
 
+export function returnBookingsToPending(payload) {
+  return adminRequest('/admin/v2/bookings/return-to-pending', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function resolveConflicts(payload) {
   return adminRequest('/admin/v2/bookings/conflicts/resolve', {
     method: 'POST',
@@ -124,6 +135,17 @@ export function updateDeviceTags(payload) {
   });
 }
 
+export async function fetchDeviceDetail(deviceId) {
+  return adminRequest(`/admin/v2/devices/${deviceId}`, { method: 'GET' });
+}
+
+export function updateDeviceDetail(deviceId, payload) {
+  return adminRequest(`/admin/v2/devices/${deviceId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchUsers(params = {}) {
   const searchParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -149,6 +171,26 @@ export function updateUserRole(userId, payload) {
 
 export function updateUserStatus(userId, payload) {
   return adminRequest(`/admin/v2/users/${userId}/status`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchInvitations(params = {}) {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if(value === undefined || value === null || value === '') return;
+    searchParams.set(key, value);
+  });
+  return adminRequest(`/admin/v2/invitations?${searchParams.toString()}`, {method: 'GET' });
+}
+
+export function approveInvitation(invitationId) {
+  return adminRequest(`/admin/v2/invitations/${invitationId}/approve`, { method: 'POST' });
+}
+
+export function rejectInvitation(invitationId, payload = {}) {
+  return adminRequest(`/admin/v2/invitations/${invitationId}/reject`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -199,3 +241,10 @@ export function globalSearch(params = {}) {
   return adminRequest(`/admin/v2/search?${searchParams.toString()}`, { method: 'GET' });
 }
 
+export function fetchBookingGroupDetail(groupId) {
+  return adminRequest(`/admin/v2/bookings/group/${groupId}`, { method: 'GET' });
+}
+
+export function deleteUser(userId) {
+  return adminRequest(`/admin/v2/users/${userId}`, { method: 'DELETE' });
+}

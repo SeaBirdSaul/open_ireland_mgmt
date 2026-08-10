@@ -1,3 +1,11 @@
+/**
+ * Used by both TagCreate and TagEdit pages
+ * 
+ * A reusable form component for creating and editing tags in the 
+ *  inventory management system.
+ * Supports both 'create' and 'edit' modes with appropriate field validations.
+ * Manages form state, validation, and submission handling.
+ */
 import React, { useState, useEffect } from 'react';
 import { Card, Input, Button, Alert, Tag } from '@tcdona/ui';
 
@@ -58,7 +66,7 @@ export default function TagForm({
   };
 
   const handleChange = (name, value) => {
-    const processedValue = typeof value === 'string' ? value.trim() : value;
+    const processedValue = typeof value === 'string' ? value : value;
     setFormData((prev) => ({ ...prev, [name]: processedValue }));
     if (errors[name]) {
       setErrors((prev) => {

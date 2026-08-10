@@ -1,3 +1,6 @@
+'''
+Script to verify the standalone U2 device schema and data integrity.
+'''
 import os
 import sys
 from sqlalchemy import create_engine, text

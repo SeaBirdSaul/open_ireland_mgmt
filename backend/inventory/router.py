@@ -1,5 +1,9 @@
 # router.py - Inventory Management REST API Endpoints
-
+'''
+Defines FastAPI routes for inventory management operations,
+Including CRUD operations for devices, device types, manufacturers, sites, and tags.
+Provides filtering, pagination, and history tracking functionalities.
+'''
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, File, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -8,10 +12,14 @@ from typing import List, Optional
 from datetime import datetime
 import shutil
 import os
+import pytz
 
 from backend.core.deps import get_db
 from backend.inventory import models, schemas
 from backend.inventory.models import InventoryDevice, InventoryDeviceTag
+
+# Timezone for Ireland
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 router = APIRouter()
 
@@ -1111,7 +1119,7 @@ def _device_history_to_response(history: models.DeviceHistory, db: Session) -> s
 
 # ================== Attachment Management ==================
 
-UPLOAD_DIR = "/app/uploads"
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/app/uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/devices/{device_id}/attachments", response_model=schemas.DeviceResponse)
@@ -1130,7 +1138,7 @@ def upload_attachment(
 
     # Generate safe filename
     # Prefix with device_id to avoid collisions or grouping
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(IRELAND_TZ).strftime("%Y%m%d_%H%M%S")
     safe_filename = f"{device_id}_{timestamp}_{file.filename}"
     file_path = os.path.join(UPLOAD_DIR, safe_filename)
     

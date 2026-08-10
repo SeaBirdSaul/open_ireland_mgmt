@@ -1,18 +1,27 @@
+/**
+ * Utility functions for grouping booking dates, summarizing devices,
+ * and merging grouped booking entries for the Lab Scheduler application.
+ * Provides functions to format date ranges and build gallery entries.
+ */
+
+import { parseLocalDate, formatLocalDateKey } from './localDate';
+
+
 export function groupDatesIntoRanges(dates = []) {
-  const sorted = [...new Set(dates)].sort((a, b) => new Date(a) - new Date(b));
+  const sorted = [...new Set(dates)].sort((a, b) => parseLocalDate(a) - parseLocalDate(b));
   if (sorted.length === 0) {
     return [];
   }
 
   const ranges = [];
   let rangeStart = sorted[0];
-  let prevDate = new Date(sorted[0]);
+  let prevDate = parseLocalDate(sorted[0]);
 
   for (let i = 1; i < sorted.length; i++) {
-    const currentDate = new Date(sorted[i]);
+    const currentDate = parseLocalDate(sorted[i]);
     const diffDays = Math.round((currentDate - prevDate) / (1000 * 60 * 60 * 24));
     if (diffDays > 1) {
-      ranges.push({ start: rangeStart, end: prevDate.toISOString().split('T')[0] });
+      ranges.push({ start: rangeStart, end: formatLocalDateKey(prevDate) });
       rangeStart = sorted[i];
     }
     prevDate = currentDate;
@@ -36,8 +45,8 @@ export function summarizeDevices(devices = []) {
 }
 
 export function formatDateRangeLabel(start, end) {
-  const startDate = new Date(start);
-  const endDate = new Date(end);
+  const startDate = parseLocalDate(start);
+  const endDate = parseLocalDate(end);
   const sameDay = startDate.toDateString() === endDate.toDateString();
   if (sameDay) {
     return startDate.toLocaleDateString('en-US', {
@@ -77,6 +86,18 @@ export function buildGroupSummary(group) {
   };
 }
 
+function normalizeCollaborators(collaborators) {
+  if (Array.isArray(collaborators)) {
+    return collaborators.filter((name) => typeof name === 'string' && name.trim());
+  }
+
+  if (typeof collaborators === 'string') {
+    const trimmed = collaborators.trim();
+    return trimmed ? [trimmed]: [];
+  }
+
+  return [];
+}
 export function mergeGroupedBookingEntries(groups = []) {
   const dedupedMap = new Map();
   const statusPriority = (status) => {
@@ -110,7 +131,7 @@ export function mergeGroupedBookingEntries(groups = []) {
     if (!existing) {
       dedupedMap.set(key, {
         ...group,
-        collaborators: Array.from(new Set(group.collaborators || [])),
+        collaborators: Array.from(new Set(normalizeCollaborators(group.collaborators))),
         devices: normalizeDevices(group.devices),
       });
       return;
@@ -119,7 +140,7 @@ export function mergeGroupedBookingEntries(groups = []) {
     if (!existing.is_owner && group.is_owner) {
       dedupedMap.set(key, {
         ...group,
-        collaborators: Array.from(new Set(group.collaborators || [])),
+        collaborators: Array.from(new Set(normalizeCollaborators(group.collaborators))),
         devices: normalizeDevices(group.devices),
       });
       return;
@@ -130,8 +151,8 @@ export function mergeGroupedBookingEntries(groups = []) {
     const mergedStatus = statusCandidates[0] || 'PENDING';
 
     const collaboratorSet = new Set([
-      ...(existing.collaborators || []),
-      ...(group.collaborators || []),
+      ...normalizeCollaborators(existing.collaborators),
+      ...normalizeCollaborators(group.collaborators),
     ]);
 
     const devicesMap = new Map();

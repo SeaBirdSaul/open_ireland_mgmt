@@ -1,4 +1,6 @@
-
+'''
+Script to verify backend logic for device listing and serialization.
+'''
 import sys
 import logging
 from sqlalchemy import create_engine

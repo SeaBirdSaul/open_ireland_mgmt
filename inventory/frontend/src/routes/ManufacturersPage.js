@@ -1,3 +1,8 @@
+/**
+ * Page for managing manufacturers in the inventory system.
+ * Allows viewing, creating, editing, and deleting manufacturers.
+ * Utilizes custom hooks for data fetching and mutations.
+ */
 import React, { useState, useMemo, useCallback } from 'react';
 import { PageHeader, Button, Card, Table, Modal, Alert } from '@tcdona/ui';
 import { useManufacturers, useCreateManufacturer, useUpdateManufacturer, useDeleteManufacturer } from '../hooks/useInventoryData';

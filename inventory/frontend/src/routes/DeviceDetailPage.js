@@ -1,3 +1,8 @@
+/**
+ * Displays detailed information about a specific device,
+ *  including overview, tags, and history tabs.
+ * Allows editing and deleting the device.
+ */
 import React, { useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { PageHeader, Card, Tabs, Button, Tag, Alert, Input, Select, Modal } from '@tcdona/ui';

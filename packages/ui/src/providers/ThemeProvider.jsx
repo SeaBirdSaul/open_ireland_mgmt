@@ -1,4 +1,5 @@
-// TODO: Implement component (placeholder)
+// ThemeProvider to manage light/dark themes
+// Provides context for theme state and toggling
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const ThemeContext = createContext();

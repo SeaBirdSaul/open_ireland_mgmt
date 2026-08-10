@@ -1,3 +1,15 @@
+/**
+ * Main application component for the inventory management frontend.
+ * Sets up routing, theming, and context providers.
+ * Imports UI components from the shared UI library.
+ * Uses React Router for navigation between different pages.
+ * Wraps the app in QueryProvider for data fetching and caching.
+ * Wraps the app in ToastProvider for toast notifications.
+ * Applies a consistent theme using ThemeProvider from the UI library.
+ * Defines routes for devices, device types, manufacturers, sites, tags, and stats pages.
+ * Exports the App component as the default export.
+ */
+
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, AppShell, Sidebar, Header } from '@tcdona/ui';

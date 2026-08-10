@@ -1,4 +1,12 @@
-// TODO: Implement component (placeholder)
+// Table component for displaying tabular data with optional selection and bulk actions
+// Accepts props: columns (array), rows (array), selection (object), bulkActions (function), loading (boolean), emptyState (React node), onRowClick (function), rowId (function)
+// Columns can have: key (string), header (string), accessor (function), render (function), className (string), headerClassName (string)
+// Selection object should have: state (with count and isAllSelected), methods (selectAll, clear, isSelected, toggle)
+// Bulk actions function receives the selection object and returns React nodes
+// Loading state shows a skeleton, empty state shows a message or custom node
+// Rows are rendered with optional click handler
+// Row ID function defaults to row.id
+ 
 import React from 'react';
 import clsx from 'clsx';
 
@@ -73,7 +81,7 @@ export default function Table({
   }
 
   return (
-    <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-950 shadow-sm">
+    <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden overflow-x-auto bg-white dark:bg-gray-950 shadow-sm">
       {bulkActions && selection?.state.count > 0 && (
         <div className="bg-blue-50 dark:bg-blue-900/40 border-b border-blue-100 dark:border-blue-800 px-4 py-3 flex items-center justify-between">
           <div className="text-sm font-semibold text-blue-600 dark:text-blue-200">
@@ -91,7 +99,7 @@ export default function Table({
           </div>
         </div>
       )}
-      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+      <table className="min-w-full md:min-w-[640px] divide-y divide-gray-200 dark:divide-gray-800">
         <thead className="bg-gray-50 dark:bg-gray-900/40">
           <tr>
             {hasSelection && (

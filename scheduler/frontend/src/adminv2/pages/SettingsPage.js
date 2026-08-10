@@ -1,3 +1,9 @@
+/**
+ * SettingsPage component for managing application settings in the admin interface.
+ * Fetches current settings, allows editing, and updates settings via API.
+ * Utilizes React Query for data fetching and state management.
+ * Integrates with AdminContext for permissions and toast notifications.
+ */
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchSettings, updateSettings } from '../api';

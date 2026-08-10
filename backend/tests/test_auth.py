@@ -3,7 +3,7 @@ Tests for user authentication endpoints
 """
 import pytest
 from fastapi.testclient import TestClient
-from models import User
+from backend.scheduler.models import User
 
 
 def test_user_registration_success(client, db_session):
@@ -13,6 +13,8 @@ def test_user_registration_success(client, db_session):
         json={
             "username": "newuser",
             "email": "newuser@example.com",
+            "firstName": "New",
+            "lastName": "User",
             "password": "password123",
             "password2": "password123",
             "discord_id": "111111111"
@@ -23,7 +25,7 @@ def test_user_registration_success(client, db_session):
     assert data["username"] == "newuser"
     assert data["email"] == "newuser@example.com"
     assert "password" not in data
-    assert data["is_admin"] is False
+    assert data["role"] == "viewer"
 
 
 def test_user_registration_duplicate_username(client, test_user):
@@ -33,6 +35,8 @@ def test_user_registration_duplicate_username(client, test_user):
         json={
             "username": "testuser",
             "email": "different@example.com",
+            "firstName": "Different",
+            "lastName": "User",
             "password": "password123",
             "password2": "password123"
         }

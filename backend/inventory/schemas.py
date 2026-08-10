@@ -1,5 +1,9 @@
 # schemas.py - Inventory Management Pydantic Schemas
-
+'''
+Defines Pydantic schemas for the inventory management system.
+Includes schemas for devices, device types, manufacturers, sites, tags,
+    and history tracking, along with validation and serialization rules.
+'''
 from pydantic import BaseModel, Field, validator, IPvAnyAddress
 from typing import Optional, List, Dict, Any
 from datetime import datetime

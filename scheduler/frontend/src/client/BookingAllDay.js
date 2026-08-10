@@ -1,3 +1,9 @@
+/**
+ * Multi-Device Booking Popup Window
+ * Allows users to search for multiple devices, select date ranges, check for conflicts, and save selections.
+ * Utilizes Fuse.js for fuzzy searching of devices.
+ * Saves state in local storage to preserve user input across sessions.
+ */
 import Fuse from 'fuse.js';
 import React, { useCallback, useEffect, useState } from 'react';
 import '../App.css';

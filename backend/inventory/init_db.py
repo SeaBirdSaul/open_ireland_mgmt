@@ -1,5 +1,4 @@
 # init_db.py - Initialize Inventory Management Database Tables
-
 """
 Script to create inventory management database tables.
 This can be run standalone or imported to create tables along with scheduler tables.

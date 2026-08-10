@@ -1,4 +1,8 @@
-
+'''
+Migration script to transfer devices from legacy 'device_table' to new 'devices' table.
+Preserves IDs, maps device types, and handles Polatis-specific fields.
+Assumes both tables are in the same database.
+'''
 import sys
 import logging
 from sqlalchemy import create_engine, select, func, text
@@ -17,7 +21,7 @@ from backend.core.database import Base
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("migration")
 
-DATABASE_URL = "mysql+pymysql://openireland:ChangeMe_Dev123%21@10.10.10.4:3306/provdb_dev"
+DATABASE_URL = "mysql+pymysql://murphe83:password@10.10.10.4:3306/provdb_dev"
 
 def migrate_devices():
     logger.info(f"Connecting to DB: {DATABASE_URL}")

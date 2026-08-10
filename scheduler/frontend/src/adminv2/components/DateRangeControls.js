@@ -1,3 +1,8 @@
+/**
+ * Date range selection controls with preset options and custom date inputs.
+ * Allows users to select common date ranges or specify custom start and end dates.
+ * Persists the selected preset using local storage.
+ */
 import React, { useEffect, useMemo } from 'react';
 import usePersistentState from '../hooks/usePersistentState';
 

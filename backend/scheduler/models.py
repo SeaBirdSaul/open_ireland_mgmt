@@ -1,5 +1,8 @@
 # models.py
-
+'''
+SQLAlchemy ORM models for the scheduler application.
+Includes models for users, bookings, devices, topologies, and admin features.
+'''
 import uuid
 from sqlalchemy import (
     Column,
@@ -10,6 +13,7 @@ from sqlalchemy import (
     Text,
     Boolean,
     JSON,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -22,9 +26,14 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     discord_id = Column(String(20), unique=True, nullable=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
-    email = Column(String(100), unique=True, nullable=True)
+    firstName = Column(String(200), nullable=False)
+    lastName = Column(String(200), nullable=False)
+    email = Column(String(100), unique=True, nullable=False)
     password = Column(String(100), nullable=False)
-    is_admin = Column(Boolean, default=False)
+    role = Column(String(50), nullable=False)
+    previous_login_at = Column(DateTime, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
+    status = Column(String(100), nullable=False)
 
     bookings = relationship("Booking", back_populates="user")
     topologies = relationship("Topology", back_populates="user")
@@ -33,7 +42,6 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
-
 
 
 # ============================================================================
@@ -50,6 +58,7 @@ class Device(Base):
     status = Column(String(50), nullable=True)
     maintenance_start = Column(String(100), nullable=True)
     maintenance_end = Column(String(100), nullable=True)
+    maintenance_return_status = Column(String(50), nullable=True)
 
     Out_Port = Column(Integer, nullable=False)
     In_Port = Column(Integer, nullable=False)
@@ -80,6 +89,7 @@ class Booking(Base):
     comment = Column(Text, nullable=True)
     collaborators = Column(JSON, nullable=True, default=list)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    status_updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     # Point to InventoryDevice explicitly because "Device" alias might not be in registry
     device = relationship("Device", back_populates="bookings")
@@ -230,8 +240,12 @@ class AdminInvitation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(200), nullable=False)
+    firstName = Column(String(50), nullable=False)
+    lastName = Column(String(50), nullable=False)
     handle = Column(String(100), nullable=True)
+    password = Column(String(255), nullable=False)
     role = Column(String(50), nullable=False, default="Viewer")
+    notes = Column(Text, nullable=True)
     invited_by = Column(Integer, ForeignKey("user_table.id"), nullable=True)
     token = Column(String(64), nullable=False, unique=True)
     expires_at = Column(DateTime, nullable=False)
@@ -239,3 +253,57 @@ class AdminInvitation(Base):
     accepted_at = Column(DateTime, nullable=True)
 
     inviter = relationship("User")
+
+# ===================== Emails ============================
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key = True, index = True)
+    user_id = Column(Integer, ForeignKey("user_table.id"), nullable = False, index = True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    consumed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    requested_ip = Column(String(64), nullable=True)
+    requested_user_agent = Column(String(512), nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("ix_password_reset_user_active", "user_id", "consumed_at", "expires_at"),
+    )
+
+class EmailVerificationToken(Base):
+    __tablename__ = "email_verification_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("user_table.id"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    consumed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    requested_ip = Column(String(64), nullable=True)
+    requested_user_agent = Column(String(512), nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("ix_email_verify_user_active", "user_id", "consumed_at", "expires_at"),
+    )
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(String(128), primary_key=True,index=True)
+    user_id = Column(Integer, ForeignKey("user_table.id"), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("ix_user_sessions_user_active", "user_id", "revoked_at", "expires_at"),
+    )

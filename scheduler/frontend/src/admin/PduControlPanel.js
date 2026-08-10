@@ -1,3 +1,6 @@
+/**
+ * A simple control panel for managing Power Distribution Units (PDUs).
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import "./simpleControlPanel.css"

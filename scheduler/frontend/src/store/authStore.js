@@ -1,43 +1,85 @@
+/**
+ * Zustand store for managing authentication state.
+ * Includes actions to refresh and clear authentication,
+ * with robust error handling and retry logic.
+ */
 import { create } from 'zustand';
 import { API_BASE_URL } from '../config/api';
+
+const UNAUTH_REFRESH_COOLDOWN_MS = 5000; // Timeout to prevent spamming refreshes
+let inUseRefresh = null;
+let lastUnauthAt = 0;
+let authEpoch = 0;
+let activeAuthAbortController = null;
 
 const useAuthStore = create((set, get) => ({
   // Auth state
   authenticated: false,
   userId: null,
   username: null,
-  isAdmin: false,
+  role: null,
   loading: true, // Initial loading state
+  previousLoginAt: null,
+  lastLoginAt: null,
+  authEpoch: 0,
 
   // Actions
   refreshAuth: async (retryCount = 0) => {
-    set({ loading: true });
-    try {
-      // Create abort controller for timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-      
-      const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
-        method: 'GET',
-        credentials: 'include',
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
+    if(inUseRefresh){
+      return inUseRefresh;
+    }
+    const state = get();
+    const now = Date.now();
+    const startEpoch = get().authEpoch;
 
-      // Handle network errors or non-OK responses
-      if (!res.ok) {
-        // 401/403 are expected for unauthenticated users, don't log as errors
-        if (res.status === 401 || res.status === 403) {
-          set({
-            authenticated: false,
-            userId: null,
-            username: null,
-            isAdmin: false,
-            loading: false,
-          });
-          return;
+    if(retryCount === 0 && !state.authenticated && now - lastUnauthAt < UNAUTH_REFRESH_COOLDOWN_MS) {
+      if (get().authEpoch !== startEpoch) return;
+      set({ loading: false });
+      return;
+    }
+
+    inUseRefresh = (async () => {
+      if (get().authEpoch !== startEpoch) return;
+      set({ loading: true });
+
+      let controller = null;
+      let timeoutId = null;
+
+      try {
+        // Create abort controller for timeout
+        controller = new AbortController();
+        activeAuthAbortController = controller;
+
+        timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          method: 'GET',
+          credentials: 'include',
+          signal: activeAuthAbortController.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        if (activeAuthAbortController === controller) {
+          activeAuthAbortController = null;
         }
+
+        // Handle network errors or non-OK responses
+        if (!res.ok) {
+          // 401/403 are expected for unauthenticated users, don't log as errors
+          if (get().authEpoch !== startEpoch) return;
+          if (res.status === 401 || res.status === 403) {
+            set({
+              authenticated: false,
+              userId: null,
+              username: null,
+              role: null,
+              loading: false,
+              previousLoginAt: null,
+              lastLoginAt: null,
+            });
+            return;
+          }
+
         // Other errors (500, network issues, etc.) - retry if it's a server error
         if (res.status >= 500 && retryCount < 2) {
           // Retry server errors up to 2 times with exponential backoff
@@ -46,6 +88,7 @@ const useAuthStore = create((set, get) => ({
         }
         // Don't clear auth on transient errors - keep current state
         console.warn('Auth check failed with status:', res.status);
+        if (get().authEpoch !== startEpoch) return;
         set({ loading: false });
         return;
       }
@@ -56,28 +99,36 @@ const useAuthStore = create((set, get) => ({
       } catch (parseError) {
         console.error('Failed to parse auth response', parseError);
         // Don't clear auth on parse errors - might be transient
+        if (get().authEpoch !== startEpoch) return;
         set({ loading: false });
         return;
       }
-
+      
       if (data?.authenticated) {
+        if (get().authEpoch !== startEpoch) return;
         set({
           authenticated: true,
           userId: data.user_id,
           username: data.username,
-          isAdmin: Boolean(data.is_admin),
+          role: data.role,
           loading: false,
+          previousLoginAt: data.previous_login_at || null,
+          lastLoginAt: data.last_login_at || null,
         });
       } else {
+        if (get().authEpoch !== startEpoch) return;
         set({
           authenticated: false,
           userId: null,
           username: null,
-          isAdmin: false,
+          role: null,
           loading: false,
+          previousLoginAt: data.previous_login_at || null,
+          lastLoginAt: data.last_login_at || null,
         });
-      }
-    } catch (err) {
+      }    
+    }
+    catch (err) {
       // Network errors, CORS issues, timeout, etc.
       // Retry network errors up to 2 times
       if (
@@ -87,29 +138,51 @@ const useAuthStore = create((set, get) => ({
       ) {
         if (retryCount < 2) {
           // Retry with exponential backoff
+          inUseRefresh = null;
           await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
           return get().refreshAuth(retryCount + 1);
         }
         // After retries, don't clear auth - might be temporary network issue
         // Only clear if we're sure it's a permanent issue
         console.warn('Network error during auth check, keeping current auth state');
+        if (get().authEpoch !== startEpoch) return;
         set({ loading: false });
         return;
       }
-      
       // For other errors, log but don't clear auth state
       console.error('Failed to refresh auth', err);
+      if (get().authEpoch !== startEpoch) return;
       set({ loading: false });
+    } finally { 
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      inUseRefresh = null;
+      if (activeAuthAbortController === controller) {
+        activeAuthAbortController = null;
+      }
     }
+  })();
+  return inUseRefresh;      
   },
 
-  clearAuth: () => {
+  clearAuth: () => { 
+    lastUnauthAt = Date.now();
+    authEpoch += 1;
+    if (activeAuthAbortController) {
+      activeAuthAbortController.abort();
+      activeAuthAbortController = null;
+    }
+    inUseRefresh = null;
     set({
+      authEpoch,
       authenticated: false,
       userId: null,
       username: null,
-      isAdmin: false,
+      role: null,
       loading: false,
+      previousLoginAt: null,
+      lastLoginAt: null,
     });
   },
 

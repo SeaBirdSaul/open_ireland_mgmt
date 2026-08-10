@@ -1,4 +1,6 @@
-// TODO: Implement component (placeholder)
+// Tag component for displaying labeled items with optional removal 
+// Variants include: default, primary, success, warning, danger
+// Accepts props: children (label content), variant (string), color (string), onRemove (function), className (string)
 import React from 'react';
 import clsx from 'clsx';
 

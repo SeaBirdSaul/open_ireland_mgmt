@@ -1,3 +1,9 @@
+/**
+ * LoginGate component for admin interface.
+ * Provides a login form with username and password fields.
+ * Handles loading state and displays error messages.
+ * Calls onLogin callback with credentials on form submission.
+ */
 import React, { useState } from 'react';
 
 export default function LoginGate({ onLogin, loading, error }) {

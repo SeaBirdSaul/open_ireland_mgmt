@@ -1,8 +1,16 @@
+/**
+ * Main application component for the scheduler frontend.
+ * Sets up routing for client and admin sections.
+ * Initializes authentication state on app load.
+ * Uses ProtectedAdminRoute to guard admin routes.
+ * Imports necessary components for different routes.
+ * Exports the App component as default.
+ */
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import ClientRoute from './client/ClientRoute';
 import Admin from './admin/admin';
-import AdminApp from './admin/AdminApp';
+import AdminApp from './adminv2/AdminApp';
 import TopologyBuilder from './topology/TopologyBuilder';
 import BookingsPageWrapper from './client/BookingsPageWrapper';
 import ProtectedAdminRoute from './routes/ProtectedAdminRoute';
@@ -26,9 +34,7 @@ function App() {
         <Route 
           path="/admin/*" 
           element={
-            <ProtectedAdminRoute>
               <AdminApp />
-            </ProtectedAdminRoute>
           } 
         />
         <Route 

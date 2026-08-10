@@ -1,3 +1,8 @@
+/**
+ * Per User Bookings Panel component for viewing and managing user booking sessions.
+ * Supports cancelling, extending, rebooking sessions, managing collaborators,
+ * and saving favourites.
+ */
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -62,13 +67,14 @@ async function rebookBookingGroup(groupId, userId, startDate, endDate, message) 
 
 const STATUS_META = {
   APPROVED: { label: 'Approved', icon: '🟢', bg: 'bg-emerald-100/70 dark:bg-emerald-900/30', text: 'text-emerald-700 dark:text-emerald-200' },
+  ONGOING: { label: 'On Going', icon: '🟢', bg: 'bg-blue-100/70 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-200' },
   PENDING: { label: 'Pending', icon: '🟡', bg: 'bg-amber-100/70 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-200' },
   DECLINED: { label: 'Declined', icon: '🔴', bg: 'bg-red-100/70 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-200' },
   CANCELLED: { label: 'Cancelled', icon: '⚪', bg: 'bg-gray-200 dark:bg-gray-700', text: 'text-gray-700 dark:text-gray-200' },
   EXPIRED: { label: 'Expired', icon: '⚪', bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-600 dark:text-gray-400' },
 };
 
-const ACTIVE_STATUSES = new Set(['APPROVED', 'PENDING']);
+const ACTIVE_STATUSES = new Set(['APPROVED', 'PENDING', 'CONFLICTING']);
 
 const shortId = (id) => id.slice(0, 8).toUpperCase();
 
@@ -182,7 +188,7 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
 
   const { data: bookingGroups = [], isLoading, error } = useQuery({
     queryKey: ['userBookingGroups', userId],
-    queryFn: () => fetchGroupedBookings(userId),
+    queryFn: () => fetchGroupedBookings(),
     enabled: Boolean(userId),
     staleTime: 30000,
     select: (groups) => (Array.isArray(groups) ? groups : []),
@@ -190,7 +196,7 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
 
   const { data: favorites = [] } = useQuery({
     queryKey: ['userFavorites', userId],
-    queryFn: () => fetchFavorites(userId),
+    queryFn: () => fetchFavorites(),
     enabled: Boolean(userId),
     staleTime: 30000,
   });
@@ -229,6 +235,40 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
     setCurrentPage(1);
   }, [showActiveOnly, filteredGroups.length]);
 
+  useEffect(() => {
+    if (!Array.isArray(filteredGroups) || !toast || !userId) return;
+
+    const storageKey = `maintenance-decline-seen:${userId}`;
+    const seen = JSON.parse(localStorage.getItem(storageKey) || '[]');
+
+    const newlyAffected = filteredGroups.filter((group) => {
+      const hasMaintenancecomment = 
+        Array.isArray(group.comments) && group.comments.some((comment) => 
+          comment?.toLowerCase().includes('declined due to device maintenance')
+        );
+
+      const isDeclined = (group.status || '').toUpperCase() === 'DECLINED';
+      const marker = `${group.grouped_booking_id}:${group.status_updated_at}`;
+
+      return hasMaintenancecomment && isDeclined && !seen.includes(marker);
+    });
+
+    if (newlyAffected.length === 0) return;
+
+    newlyAffected.forEach((group) => {
+      toast.warning(
+        `A booking was declined due to maintenance for ${group.device_count || group.devices?.length || 1} device(s).`
+      );
+    });
+
+    const nextSeen = [
+      ...seen,
+      ...newlyAffected.map((group) => `${group.grouped_booking_id}:${group.status_updated_at}`),
+    ];
+
+    localStorage.setItem(storageKey, JSON.stringify(nextSeen));
+  }, [filteredGroups, toast, userId]);
+
   const toggleExpanded = (groupId) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -240,9 +280,27 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
       return next;
     });
   };
+  const getDisplayStatus = (group) => {
+    const key = (group.status || '').toUpperCase();
 
-  const statusMeta = (status) => {
-    const key = (status || '').toUpperCase();
+    if (key === 'PENDING'){
+      return 'PENDING';
+    }
+
+    const now = new Date();
+    const start = new Date(`${group.start_date}T00:00:00`);
+    const end = new Date(`${group.end_date}T23:59:59.999`);
+    const isWithinWindow = now >= start && now <= end;
+
+    if (isWithinWindow && (key === 'APPROVED' || key === 'CONFIRMED' || key === 'EXPIRED')) {
+      return 'ONGOING';
+    }
+    
+    return key || 'PENDING'
+  }
+
+  const statusMeta = (group) => {
+    const key = getDisplayStatus(group);
     return STATUS_META[key] || STATUS_META.PENDING;
   };
 
@@ -414,7 +472,13 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
   };
 
   const openCollaboratorEditor = (group) => {
-    setCollaboratorDraft(group.collaborators || []);
+    setCollaboratorDraft(
+      Array.isArray(group.collaborators)
+      ? group.collaborators
+      : typeof group.collaborators === 'string' && group.collaborators.trim()
+      ? [group.collaborators.trim()]
+      : []
+    );
     setCollaboratorEditor(group);
   };
 
@@ -595,7 +659,13 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
   };
 
   const openDeviceCollaboratorEditor = (device, group) => {
-    setDeviceCollaboratorDraft(group.collaborators || []);
+    setDeviceCollaboratorDraft(
+      Array.isArray(group.collaborators)
+        ? group.collaborators
+        : typeof group.collaborators === 'string' && group.collaborators.trim()
+        ? [group.collaborators.trim()]
+        : []
+    );
     setDeviceCollaboratorEditor({ device, group });
   };
 
@@ -721,11 +791,22 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
         {!isLoading &&
           !error &&
           paginatedGroups.map((group) => {
-            const status = statusMeta(group.status);
+            const status = statusMeta(group);
             const expanded = expandedGroups.has(group.grouped_booking_id);
             const isOwner = group.is_owner;
             const summary = group.summary || {};
             const existingFavorite = favoriteMap.get(group.grouped_booking_id);
+            const collaborators = Array.isArray(group.collaborators)
+              ? group.collaborators
+              : typeof group.collaborators === 'string' && group.collaborators.trim()
+              ? [group.collaborators.trim()]
+              : [];
+              
+              const comments = Array.isArray(group.comments) ? group.comments.filter(Boolean) : [];
+              const maintenanceComments = comments.filter((comment) =>
+                comment.toLowerCase().includes('declined due to device maintenance')
+              );
+
             return (
               <div
                 key={group.grouped_booking_id}
@@ -757,6 +838,22 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
                       <p className="text-xs text-gray-600 dark:text-gray-400">
                         {summary.deviceSummary} · {group.device_count} device{group.device_count !== 1 ? 's' : ''}
                       </p>
+                      {comments.length > 0 && (
+                        <div className="space-y-1">
+                          {comments.map((comment, index) => (
+                            <div
+                              key={`${group.grouped_booking_id}-comment-${index}`}
+                              className={`rounded-md px-2.5 py-2 text-xs ${
+                                maintenanceComments.includes(comment)
+                                  ? 'border border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
+                                  : 'border border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                              }`}
+                            >
+                              {comment}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
                         <span>Owner:</span>
                         <span className="font-medium">@{group.owner_username}</span>
@@ -800,9 +897,9 @@ export default function MyBookingsPanel({ userId, userName, onClose }) {
                     </div>
                   </div>
 
-                  {group.collaborators && group.collaborators.length > 0 && (
+                  {collaborators.length > 0 && (
                     <div className="flex flex-wrap gap-1">
-                      {group.collaborators.map((collaborator) => (
+                      {collaborators.map((collaborator) => (
                         <span
                           key={collaborator}
                           className="inline-flex items-center rounded-full bg-gray-200 dark:bg-gray-700 px-2 py-0.5 text-[11px] font-semibold text-gray-800 dark:text-gray-100"

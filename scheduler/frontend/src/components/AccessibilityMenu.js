@@ -1,3 +1,8 @@
+/**
+ * Accessibility menu component providing options for dark mode, particle effects,
+ * and color customization via a color picker.
+ * Uses React portals for dropdown rendering and manages state for menu visibility.
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import ColorPicker from './ColorPicker';

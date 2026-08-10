@@ -1,4 +1,7 @@
-
+'''
+Script to inspect device and device type data integrity in the database.
+import requests
+'''
 import sys
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker

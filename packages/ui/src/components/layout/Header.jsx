@@ -1,4 +1,6 @@
-// TODO: Implement component (placeholder)
+// Header component with dark mode toggle and user info
+// Displays the application title and provides logout functionality
+// Accepts props: user (object), onLogout (function), title (string)
 import React from 'react';
 import { useTheme } from '../../providers/ThemeProvider';
 
@@ -7,8 +9,8 @@ export default function Header({ user, onLogout, title = 'Open Ireland Inventory
   const darkMode = theme === 'dark';
 
   return (
-    <header className="header h-16 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800">
-      <div className="header-content flex items-center justify-between px-6 h-full">
+    <header className="header h-auto sm:h-16 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800">
+      <div className="header-content flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-0 gap-2 h-full">
         <div className="header-left">
           <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h1>
         </div>

@@ -1,3 +1,8 @@
+/**
+ * Color picker component for customizing background and accent colors.
+ * Supports light and dark modes, saves preferences in local storage,
+ * and provides a circular color grid for selection.
+ */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useDocumentObserver } from '../hooks/useDocumentObserver';

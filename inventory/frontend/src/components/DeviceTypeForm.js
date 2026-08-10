@@ -1,3 +1,11 @@
+/**
+ * Used by both DeviceTypeCreate and DeviceTypeEdit pages
+ * 
+ * A reusable form component for creating and editing device types in the 
+ *  inventory management system.
+ * Supports both 'create' and 'edit' modes with appropriate field validations.
+ * Manages form state, validation, and submission handling.
+ */
 import React, { useState, useEffect } from 'react';
 import { Card, Input, Select, Button, Alert } from '@tcdona/ui';
 
@@ -62,7 +70,7 @@ export default function DeviceTypeForm({
     };
 
     const handleChange = (name, value) => {
-        const processedValue = typeof value === 'string' ? value.trim() : value;
+        const processedValue = typeof value === 'string' ? value : value;
         setFormData((prev) => ({ ...prev, [name]: processedValue }));
         if (errors[name]) {
             setErrors((prev) => {

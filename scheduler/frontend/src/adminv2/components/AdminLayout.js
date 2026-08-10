@@ -1,9 +1,13 @@
+/**
+ * Admin layout component for the admin interface.
+ * Includes navigation sidebar, header, and main content area.
+ */
 import React, { useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import usePersistentState from '../hooks/usePersistentState';
 import { useAdminContext } from '../context/AdminContext';
 import GlobalSearchBar from './GlobalSearchBar';
-import useDateRangeStore from '../state/useDateRangeStore';
+// import useDateRangeStore from '../state/useDateRangeStore';
 
 const Icon = {
   dashboard: (
@@ -64,7 +68,7 @@ const NAV_ITEMS = [
   { key: 'approvals', label: 'Approvals', path: '/admin/approvals', icon: Icon.approvals },
   { key: 'bookings', label: 'Bookings', path: '/admin/bookings', icon: Icon.bookings },
   { key: 'devices', label: 'Devices', path: '/admin/devices', icon: Icon.devices },
-  { key: 'topologies', label: 'Topologies', path: '/admin/topologies', icon: Icon.topologies },
+  { key: 'topologies', label: 'Topologies', path: '/admin/topologies', icon: Icon.topologies, hidden: true },
   { key: 'users', label: 'Users & Roles', path: '/admin/users', icon: Icon.users },
   { key: 'logs', label: 'Logs & Audit', path: '/admin/logs', icon: Icon.logs },
   { key: 'settings', label: 'Settings', path: '/admin/settings', icon: Icon.settings, requiresSetting: true },
@@ -74,12 +78,13 @@ function AdminLayout({ children }) {
   const location = useLocation();
   const { session, logout, permissions } = useAdminContext();
   const [isNavOpen, setIsNavOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = usePersistentState('admin-sidebar-collapsed', false);
   const [darkMode, setDarkMode] = usePersistentState('admin-dark-mode', () => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem('darkMode') === 'true';
   });
-  const dateRange = useDateRangeStore((state) => state.getRange('global'));
-  const setDateRange = useDateRangeStore((state) => state.setRange);
+  // const dateRange = useDateRangeStore((state) => state.getRange('global'));
+  // const setDateRange = useDateRangeStore((state) => state.setRange);
 
   React.useEffect(() => {
     if (darkMode) {
@@ -92,6 +97,9 @@ function AdminLayout({ children }) {
 
   const availableNavItems = useMemo(() => {
     return NAV_ITEMS.filter((item) => {
+      if (item.hidden) {
+        return false;
+      }
       if (item.key === 'settings') {
         return permissions?.['settings:write'];
       }
@@ -99,78 +107,105 @@ function AdminLayout({ children }) {
     });
   }, [permissions]);
 
-  React.useEffect(() => {
-    if (!dateRange?.start || !dateRange?.end) {
-      const now = new Date();
-      const iso = now.toISOString().slice(0, 10);
-      setDateRange('global', {
-        start: iso,
-        end: iso,
-        preset: 'Today',
-      });
-    }
-  }, [dateRange, setDateRange]);
+  // React.useEffect(() => {
+  //   if (!dateRange?.start || !dateRange?.end) {
+  //     const now = new Date();
+  //     const iso = now.toISOString().slice(0, 10);
+  //     setDateRange('global', {
+  //       start: iso,
+  //       end: iso,
+  //       preset: 'Today',
+  //     });
+  //   }
+  // }, [dateRange, setDateRange]);
 
   const activeKey =
     availableNavItems.find((item) => location.pathname.startsWith(item.path))?.key || 'dashboard';
 
-  const presets = [
-    { key: 'today', label: 'Today' },
-    { key: 'week', label: 'This Week' },
-    { key: 'next-week', label: 'Next Week' },
-    { key: 'month', label: 'This Month' },
-  ];
+  // const presets = [
+  //   { key: 'today', label: 'Today' },
+  //   { key: 'week', label: 'This Week' },
+  //   { key: 'next-week', label: 'Next Week' },
+  //   { key: 'month', label: 'This Month' },
+  // ];
 
-  const handlePreset = (key) => {
-    const now = new Date();
-    const start = new Date(now);
-    const end = new Date(now);
+  // const handlePreset = (key) => {
+  //   const now = new Date();
+  //   const start = new Date(now);
+  //   const end = new Date(now);
 
-    switch (key) {
-      case 'week': {
-        const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
-        start.setDate(now.getDate() + diff);
-        end.setDate(start.getDate() + 6);
-        break;
-      }
-      case 'next-week': {
-        const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
-        start.setDate(now.getDate() + diff + 7);
-        end.setDate(start.getDate() + 6);
-        break;
-      }
-      case 'month': {
-        start.setDate(1);
-        end.setMonth(start.getMonth() + 1);
-        end.setDate(0);
-        break;
-      }
-      default:
-        break;
-    }
+  //   switch (key) {
+  //     case 'week': {
+  //       const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+  //       start.setDate(now.getDate() + diff);
+  //       end.setDate(start.getDate() + 6);
+  //       break;
+  //     }
+  //     case 'next-week': {
+  //       const diff = now.getDay() === 0 ? -6 : 1 - now.getDay();
+  //       start.setDate(now.getDate() + diff + 7);
+  //       end.setDate(start.getDate() + 6);
+  //       break;
+  //     }
+  //     case 'month': {
+  //       start.setDate(1);
+  //       end.setMonth(start.getMonth() + 1);
+  //       end.setDate(0);
+  //       break;
+  //     }
+  //     default:
+  //       break;
+  //   }
 
-    setDateRange('global', {
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
-      preset: presets.find((preset) => preset.key === key)?.label ?? 'Custom',
-    });
-  };
+  //   setDateRange('global', {
+  //     start: start.toISOString().slice(0, 10),
+  //     end: end.toISOString().slice(0, 10),
+  //     preset: presets.find((preset) => preset.key === key)?.label ?? 'Custom',
+  //   });
+  // };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+    <div className="flex w-full min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <aside
         className={[
           'fixed inset-y-0 left-0 z-40 w-72 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 transition-transform duration-200 ease-in-out',
           isNavOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+          isSidebarCollapsed ? 'md:w-20' : 'md:w-72',
         ].join(' ')}
       >
-        <div className="h-16 border-b border-slate-200 dark:border-slate-800 px-6 flex items-center">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-blue-500 font-semibold">Open Ireland Labs</div>
-            <div className="mt-1 text-lg font-bold">Admin Control</div>
-          </div>
+        <div className={[
+          'h-16 border-b border-slate-200 dark:border-slate-800 px-6 flex items-center',
+          isSidebarCollapsed ? 'justify-center px-2' : 'justify-between px-6',
+        ].join(' ')}
+        >
+          {!isSidebarCollapsed && (
+            <div>
+              <div className="text-xs uppercase tracking-wide text-blue-500 font-semibold">Open Ireland Labs</div>
+              <div className="mt-1 text-lg font-bold">Admin Control</div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+            className='hidden md:inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 test-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+            aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <svg className='h-4 w-4' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8'>
+              {isSidebarCollapsed ? (
+                <path strokeLinecap='round' strokeLinejoin='round' d='M9 6l6 6-6 6' />
+              ) : (
+                <path strokeLinecap='round' strokeLinejoin='round' d='M15 6l-6 6 6 6' />
+              )}
+            </svg>
+          </button>
         </div>
-        <nav className="px-3 py-4 text-sm font-semibold">
+        <nav 
+          className={['py-4 text-sm font-semibold',
+            isSidebarCollapsed ? 'px-2' : 'px-3',
+          ].join(' ')}
+        >
           <ul className="space-y-1">
             {availableNavItems.map((item) => {
               const isActive = activeKey === item.key;
@@ -180,28 +215,40 @@ function AdminLayout({ children }) {
                     to={item.path}
                     end={item.path === '/admin/dashboard'}
                     className={[
-                      'flex items-center gap-3 rounded-lg px-3 py-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500',
+                      'flex rounded-lg py-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500',
+                      isSidebarCollapsed ? 'justify-center px-2' : 'items-center gap-3 px-3',
                       isActive
                         ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200'
                         : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50/70 dark:hover:bg-blue-900/20',
                     ].join(' ')}
                     onClick={() => setIsNavOpen(false)}
+                    title={isSidebarCollapsed ? item.label : undefined}
                   >
                     <span className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-200">
                       {item.icon}
                     </span>
-                    <span>{item.label}</span>
+                    {!isSidebarCollapsed && <span>{item.label}</span>}
                   </NavLink>
                 </li>
               );
             })}
           </ul>
         </nav>
-        <div className="mt-auto px-4 py-4 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-400">
-          Built for approvals & uptime · v2
+        <div
+          className={[
+            'mt-auto border-t border-slate-200 dark:border-slate-800 text-xs text-slate-400',
+            isSidebarCollapsed ? 'px-2 py-4 text-center' : 'px-4 py-4',
+          ].join(' ')}
+        >
+          {isSidebarCollapsed ? 'v2' : 'Built for approvals & uptime · v2'}
         </div>
       </aside>
-      <div className="flex-1 md:pl-72">
+      <div 
+        className={[
+          'flex-1 transition-all duration-200',
+          isSidebarCollapsed ? 'md:pl-20' : 'md:pl-72',
+        ].join(' ')}
+      >
         <header className="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-950/90 backdrop-blur">
           <div className="flex h-16 items-center gap-4 px-4 sm:px-6">
             <button
@@ -216,7 +263,7 @@ function AdminLayout({ children }) {
             </button>
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <GlobalSearchBar />
-              <div className="hidden sm:flex items-center gap-2">
+              {/* <div className="hidden sm:flex items-center gap-2">
                 {presets.map((preset) => {
                   const isActive = (dateRange?.preset || 'Today') === preset.label;
                   return (
@@ -238,7 +285,7 @@ function AdminLayout({ children }) {
               </div>
               <div className="hidden lg:flex text-xs text-slate-500 dark:text-slate-400">
                 {dateRange?.start ? `${dateRange.start} → ${dateRange.end}` : 'Date range · Custom'}
-              </div>
+              </div> */}
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -270,15 +317,21 @@ function AdminLayout({ children }) {
               <button
                 type="button"
                 onClick={logout}
-                className="hidden sm:inline-flex items-center rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                className="hidden sm:inline-flex items-center rounded-md border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:ring-offset-1"
               >
                 Sign out
               </button>
+              <NavLink
+              to="/"
+              className="hidden sm:inline-flex items-center rounded-md border-slate-200 dark:border-slate-700 px-3 py-2 text-us font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              Back to Client
+            </NavLink>
             </div>
           </div>
         </header>
         <main className="bg-slate-50 dark:bg-slate-950 min-h-[calc(100vh-4rem)]">
-          <div className="px-4 py-6 sm:px-6 lg:px-10">{children}</div>
+          <div className="px-4 py-6 sm:px-6 lg:px-12">{children}</div>
         </main>
       </div>
     </div>
@@ -286,4 +339,3 @@ function AdminLayout({ children }) {
 }
 
 export default AdminLayout;
-

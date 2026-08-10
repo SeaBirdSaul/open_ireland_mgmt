@@ -1,3 +1,9 @@
+/**
+ * Entry point for the inventory management frontend application.
+ * Renders the main App component into the root DOM element.
+ * Sets up React Strict Mode for highlighting potential issues.
+ * Includes error handling to suppress ResizeObserver errors in development.
+ */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';

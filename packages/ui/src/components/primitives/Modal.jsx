@@ -1,5 +1,10 @@
-// TODO: Implement component (placeholder)
+// Modal component for displaying content in an overlay
+// Accepts props: isOpen (boolean), onClose (function), title (string), children (content), size (string), footer (React nodes)
+// Sizes include: sm, md, lg, xl
+// Closes when clicking outside the modal or on the close button
+// Prevents propagation of click events inside the modal content
 import React from 'react';
+import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 
 export default function Modal({ 
@@ -19,14 +24,14 @@ export default function Modal({
     xl: 'max-w-4xl',
   };
 
-  return (
+  return createPortal(
     <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center overflow-y-auto"
       onClick={onClose}
     >
       <div 
         className={clsx(
-          'bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full mx-4',
+          'bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full mx-4 max-h-[90vh] flex flex-col',
           sizeClasses[size]
         )}
         onClick={(e) => e.stopPropagation()}
@@ -43,7 +48,7 @@ export default function Modal({
             </button>
           </div>
         )}
-        <div className="px-6 py-4">
+        <div className="px-6 py-4 overflow-y-auto">
           {children}
         </div>
         {footer && (
@@ -52,7 +57,7 @@ export default function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
-

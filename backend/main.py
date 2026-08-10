@@ -1,4 +1,9 @@
 # main.py
+'''
+Main application entry point for the backend.
+Sets up FastAPI application, database connections, middleware, and routes.
+Switch board for the backend services
+'''
 from fastapi import (
     FastAPI,
     Depends,
@@ -7,6 +12,7 @@ from fastapi import (
     Response,
     BackgroundTasks,
     Query,
+    Body,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -18,13 +24,14 @@ from sqlalchemy import or_, and_, text, bindparam, inspect
 from sqlalchemy.orm import Session
 
 from backend.scheduler import models, schemas
+from pydantic import BaseModel, EmailStr, Field, validator
 import asyncio
 import os
 import logging
 
 logger = logging.getLogger(__name__)
 
-from backend.core.database import engine, Base
+from backend.core.database import engine, Base, SessionLocal
 from backend.core.hash import hash_password, verify_password
 from backend.core.deps import get_db
 from backend.scheduler.schemas import (
@@ -40,32 +47,80 @@ from backend.scheduler.schemas import (
     BookingFavoriteUpdate,
 )
 
-from datetime import datetime
+from datetime import datetime, timezone
 from datetime import timedelta
 import uuid
 from zoneinfo import ZoneInfo
+import pytz
 
-from typing import List, Optional, Iterable
+# Timezone for Ireland
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
+
+from typing import List, Optional, Iterable, Any
 
 from backend.scheduler.routers.admin import router as admin_router
-# from backend.scheduler.routers.admin_v2 import router as admin_v2_router
+from backend.scheduler.routers.adminV2 import router as admin_v2_router
 from backend.scheduler.routers.admin_debug import router as admin_debug_router
 from backend.scheduler.routers.control_panel import router as control_panel_router
-from backend.core.discord_utils import send_booking_created_notification
+# from backend.scheduler.services.invitations import router as invitations_router
+from backend.core.discord_utils import (
+    initialize_discord_bot,
+    send_booking_created_notification,
+    send_admin_action_notification,
+    send_direct_discord_dm,
+)
+from backend.scheduler.services.auth_tokens import generate_reset_token, generate_auth_code, hash_token, token_ttl_minutes
+from backend.scheduler.services.mailer import send_password_reset_email, send_email_verification_email
+from backend.scheduler.services.sessions import create_user_session, get_user_from_session_cookie, revoke_session_by_cookie
+from backend.scheduler.services.maintenance import sync_scheduled_maintenance_statuses
+
 
 # Import inventory management router
 from backend.inventory.router import router as inventory_router
 from backend.inventory import models as inventory_models  # noqa: F401
 
+from apscheduler.schedulers.background import BackgroundScheduler
+import smtplib
+from email.message import EmailMessage
+
 _TZ = ZoneInfo("Europe/Dublin")
 
 app = FastAPI()
+
+# ========= HELPER =================
+maintenance_scheduler: BackgroundScheduler | None = None
+
+def run_scheduled_maintenance_sync() -> None:
+    db = SessionLocal()
+    try:
+        result = sync_scheduled_maintenance_statuses(db)
+        db.commit()
+    
+        for notification in result.notifications:
+            if notification.discord_id:
+                send_admin_action_notification(notification.message, notification.discord_id)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Scheduled maintenance sync failed: %s", exc)
+    finally:
+        db.close()
 
 # Create all database tables on startup (scheduler models + inventory models)
 # NOTE: This is a breaking change for inventory schema:
 # - Old tables (inventory_items, inventory_history, inventory_reservations, inventory_tags) are no longer created
 # - New tables (devices, device_types, manufacturers, sites, tags, device_tags, device_history) are created
 # - Existing inventory data may need to be dropped or migrated manually
+'''
+    Parameters:
+    - None
+
+    Outputs:
+    - None
+
+    Use:
+    - Creates database tables on startup.
+    - Logs errors and optionally fails fast in debug/dev mode.
+'''
 @app.on_event("startup")
 async def create_tables():
     """Create database tables on application startup"""
@@ -79,6 +134,22 @@ async def create_tables():
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully")
+        
+        global maintenance_scheduler
+        if maintenance_scheduler is None:
+            maintenance_scheduler = BackgroundScheduler(timezone="UTC")
+            maintenance_scheduler.add_job(
+                run_scheduled_maintenance_sync,
+                trigger="interval",
+                minutes=15,
+                id="scheduled-maintenance-sync",
+                replace_existing=True
+            )
+            maintenance_scheduler.start()
+
+        # Initialize the Discord bot on startup so it appears online immediately.
+        await initialize_discord_bot()
+
     except Exception as e:
         logger.error(f"Error creating database tables: {e}")
         if fail_fast:
@@ -92,9 +163,10 @@ async def create_tables():
 
 
 app.include_router(admin_router)
-# app.include_router(admin_v2_router)
+app.include_router(admin_v2_router)
 app.include_router(admin_debug_router)
 app.include_router(control_panel_router)
+# app.include_router(invitations_router)
 try:
     app.include_router(inventory_router, prefix="/api/inventory", tags=["inventory"])
 except Exception as exc:
@@ -119,7 +191,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://.*:(25001|25002|3000|3001)",  # Allow any hostname on these ports
+    allow_origin_regex=r"http://.*:(25001|25002|25003|3000|3001|35202|35203)",  # Allow any hostname on these ports
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -129,16 +201,34 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     secret_key="some-secret-key",
-    session_cookie="session_id",
+    session_cookie="legacy_session_id",
     max_age=3600 * 24 * 7,
     same_site="lax",  # Use "lax" for same-site requests (works for same domain, different ports)
     https_only=False,  # Allow cookies over HTTP for development
 )
 
+@app.on_event("shutdown")
+async def shutdown_scheduler():
+    global maintenance_scheduler
+    if maintenance_scheduler:
+        maintenance_scheduler.shutdown(wait=False)
+        maintenance_scheduler = None
 
 # Database dependency is now imported from deps.py
 
+'''
+    Parameters:
+    - db: Database session
+    - owner_username: Username of the booking owner
+    - collaborator_usernames: List of collaborator usernames (raw input)
 
+    Outputs:
+    - Tuple of (ordered collaborator usernames, list of User objects)
+    - Returns HTTPException if any collaborator not found
+
+    Use:
+    - Cleans and validates the list of collaborator usernames.
+'''
 def _resolve_collaborators(
     db: Session, owner_username: str, collaborator_usernames: List[str]
 ) -> tuple[List[str], List[models.User]]:
@@ -177,7 +267,18 @@ def _resolve_collaborators(
     ordered_users = [found_map[name] for name in ordered_names]
     return ordered_names, ordered_users
 
+'''
+    Parameters:
+    - db: Database session
+    - booking: The owner Booking object
 
+    Outputs:
+    - List of Booking objects representing collaborator bookings for the same slot
+
+    Use:
+    - Fetches all collaborator booking entries for the same device and time 
+        slot as the given owner booking.
+'''
 def _fetch_collaborator_rows_for_slot(
     db: Session, booking: models.Booking
 ) -> List[models.Booking]:
@@ -193,13 +294,26 @@ def _fetch_collaborator_rows_for_slot(
         .all()
     )
 
+'''
+    Parameters:
+    - db: Database session
+    - owner_booking: The owner booking object
+    - collaborator_users: List of User objects to create collaborator copies for
 
+    Outputs:
+    - Number of collaborator bookings created
+
+    Use:
+    - Creates booking entries for each collaborator user based on the owner booking.
+'''
 def _create_collaborator_copies(
     db: Session,
     owner_booking: models.Booking,
     collaborator_users: List[models.User],
 ) -> int:
     created = 0
+    owner_user = db.get(models.User, owner_booking.user_id)
+    owner_username = owner_user.username if owner_user else None
     for collaborator in collaborator_users:
         db.add(
             models.Booking(
@@ -210,14 +324,64 @@ def _create_collaborator_copies(
                 start_time=owner_booking.start_time,
                 end_time=owner_booking.end_time,
                 status=owner_booking.status,
+                status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None),
                 comment=owner_booking.comment,
-                collaborators=None,
+                collaborators=[owner_username] if owner_username else None,
             )
         )
         created += 1
     return created
 
+'''
+    
 
+'''
+ACTIVE_BOOKING_STATUS = ["PENDING", "CONFLICTING", "CONFIRMED"]
+INACTIVE_BOOKING_STATUS = ["CANCELLED", "EXPIRED", "REJECTED", "DECLINED"]
+def _find_overlapping_owner_bookings(
+    db: Session, device_id: int, start_time: datetime, end_time: datetime
+) -> List[models.Booking]:
+    return(
+        db.query(models.Booking)
+        .filter(
+            models.Booking.device_id == device_id,
+            models.Booking.is_collaborator.is_(False),
+            models.Booking.end_time > start_time,
+            models.Booking.start_time < end_time,
+            models.Booking.status.in_(ACTIVE_BOOKING_STATUS),
+        )
+        .with_for_update()
+        .all()
+    )
+
+'''
+
+'''
+def _mark_slot_group_status(db: Session, owner_booking: models.Booking, status: str) -> None:
+    related = (
+        db.query(models.Booking)
+        .filter(
+            models.Booking.grouped_booking_id == owner_booking.grouped_booking_id,
+            models.Booking.device_id == owner_booking.device_id,
+            models.Booking.start_time == owner_booking.start_time,
+            models.Booking.end_time == owner_booking.end_time,
+            models.Booking.status.notin_(INACTIVE_BOOKING_STATUS),
+        )
+        .all()
+    )
+    for row in related:
+        row.status = status
+        row.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
+'''
+    Parameters:
+    - favorite: BookingFavorite model instance
+
+    Outputs:
+    - Dictionary representation of the BookingFavorite
+
+    Use:
+    - Converts a BookingFavorite model instance to a dictionary for JSON responses.
+'''
 def _favorite_to_dict(favorite: models.BookingFavorite) -> dict:
     return {
         "id": favorite.id,
@@ -232,7 +396,17 @@ def _favorite_to_dict(favorite: models.BookingFavorite) -> dict:
 
 _DEVICE_BOOKING_SUPPORT: Optional[bool] = None
 
+'''
+    Parameters:
+    - db: Database session
 
+    Outputs:
+    - Boolean indicating if device_booking table is supported
+
+    Use: 
+    - Checks if the device_booking table exists in the database.
+    - Logs a warning if inspection fails.
+'''
 def _device_booking_supported(db: Session) -> bool:
     global _DEVICE_BOOKING_SUPPORT
     if _DEVICE_BOOKING_SUPPORT is not None:
@@ -246,6 +420,18 @@ def _device_booking_supported(db: Session) -> bool:
     return _DEVICE_BOOKING_SUPPORT
 
 
+'''
+    Parameters:
+    - db: Database session
+    - booking_ids: Iterable of booking IDs to delete device_booking rows for
+
+    Outputs:
+    - None
+
+    Use:
+    - Deletes entries from the device_booking table for the given booking IDs.
+    - Logs a warning if deletion fails.
+'''
 def _delete_device_booking_rows(db: Session, booking_ids: Iterable[int]) -> None:
     ids = list(booking_ids)
     if not ids:
@@ -262,44 +448,282 @@ def _delete_device_booking_rows(db: Session, booking_ids: Iterable[int]) -> None
             "Unable to delete device_booking rows for booking_ids=%s: %s", ids, exc
         )
 
+# ================== Email Helpers ==========================
+'''
+Helpers for password reset emails and the such
+'''
+def _build_reset_link(raw_token: str) -> str:
+    app_public_url = os.getenv("APP_PUBLIC_URL", "http://localhost:25002")
+    return f"{app_public_url}/client?reset_token={raw_token}"
 
+def _build_verify_link(raw_token: str) -> str:
+    app_public_url = os.getenv("APP_PUBLIC_URL", "http://localhost:25002")
+    return f"{app_public_url}/client?verify_token={raw_token}"
+
+def _email_verify_ttl_minutes() -> int:
+    try:
+        value = int(os.getenv("EMAIL_VERIFY_TTL_MINUTES", "60"))
+    except ValueError:
+        value = 60
+    return max(5, min(value, 1440))
 # ================== Check Session ==================
+'''
+    Parameters:
+    - None
+
+    Outputs:
+    - JSON object with service status and name
+
+    Use:
+    - Health check endpoint to confirm the backend is running.
+'''
 @app.get("/health")
 def health_check():
     """Simple health check endpoint to verify backend is running"""
     return {"status": "ok", "service": "scheduler-backend"}
 
 
+@app.post("/debug/discord/dm")
+async def debug_discord_dm(payload: dict, request: Request, db: Session = Depends(get_db)):
+    """Debug endpoint to test Discord DM delivery."""
+    user = get_user_from_session_cookie(db, request)
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    discord_id = payload.get("discord_id")
+    message = payload.get("message")
+    if not discord_id or not message:
+        raise HTTPException(status_code=400, detail="discord_id and message required")
+    
+    from backend.core.discord_utils import _send_bot_dm
+    success = await _send_bot_dm(discord_id, message)
+    return {"success": success, "discord_id": discord_id}
+
+
+'''
+    Parameters:
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON object with login status and user details when available
+
+    Use:
+    - Returns the current session's authenticated user, if any.
+'''
 @app.get("/session")
 def get_session(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if user_id:
-        user = db.query(models.User).get(user_id)
-        if user:
-            return {"logged_in": True, "user_id": user.id, "username": user.username}
+    user = get_user_from_session_cookie(db, request)
+    if user:
+        return {"logged_in": True, "user": user.id, "user_id": user.id, "username": user.username}
     return {"logged_in": False}
 
 
+'''
+    Parameters:
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON object describing authentication state and user details
+    - HTTP 401 when unauthenticated
+
+    Use:
+    - Returns the currently authenticated user for API clients.
+'''
 @app.get("/api/auth/me")
 def get_current_user(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return JSONResponse({"authenticated": False}, status_code=401)
-
-    user = db.query(models.User).get(user_id)
+    user = get_user_from_session_cookie(db, request)
     if not user:
-        request.session.clear()
         return JSONResponse({"authenticated": False}, status_code=401)
 
+    if (user.status or "").lower() != "active":
+        return JSONResponse({"authenticated": False}, status_code=403)
     return {
         "authenticated": True,
         "user_id": user.id,
         "username": user.username,
-        "is_admin": bool(getattr(user, "is_admin", False)),
+        "role": user.role,
         "email": user.email,
+        "previous_login_at": user.previous_login_at.isoformat() if user.previous_login_at else None,
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
     }
 
+# ======================== Password Reset ===================================
 
+'''
+'''
+@app.post("/auth/password-reset/request")
+def password_reset_request(
+    payload: schemas.PasswordResetRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    generic_response = {"message": "If that account exists, a reset code has been sent."}
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.email == payload.email)
+        .first()
+    )
+    if not user or (user.status or "").lower() != "active":
+        return generic_response
+    
+    now = datetime.utcnow()
+
+    db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.user_id == user.id,
+        models.PasswordResetToken.consumed_at.is_(None),
+    ).update(
+        {"consumed_at": now},
+        synchronize_session=False,
+    )
+    
+    raw_code = generate_auth_code()
+    hashed_code = hash_token(raw_code)
+    token_row = models.PasswordResetToken(
+        user_id=user.id,
+        token_hash=hashed_code,
+        expires_at=now + timedelta(minutes=token_ttl_minutes()),
+        requested_ip=(request.client.host if request.client else None),
+        requested_user_agent=request.headers.get("user-agent"),
+    )
+    db.add(token_row)
+    db.commit()
+
+    try:
+        if user.discord_id:
+            background_tasks.add_task(
+                send_direct_discord_dm,
+                user.discord_id,
+                f"Your password reset code is: {raw_code}\nIt expires in {token_ttl_minutes()} minutes.",
+            )
+        else:
+            send_password_reset_email(
+                to_email=user.email,
+                reset_url=_build_reset_link(raw_code),
+                ttl_minutes=token_ttl_minutes(),
+            )
+    except Exception as exc:
+        logger.exception("Failed to send password reset notification: %s", exc)
+    
+    return generic_response
+
+@app.post("/auth/password-reset/confirm")
+def password_reset_confirm(payload: schemas.PasswordResetConfirm, db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    token_hash = hash_token(payload.token)
+
+    token_row = (
+        db.query(models.PasswordResetToken)
+        .filter(models.PasswordResetToken.token_hash == token_hash)
+        .with_for_update()
+        .first()
+    )
+
+    if not token_row:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    if token_row.consumed_at is not None or token_row.expires_at < now:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    
+    user = db.query(models.User).get(token_row.user_id)
+    if not user or (user.status or "").lower() != "active":
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    
+    # Assuming that paylod.new_password is already hashed in SHA256 hex
+    user.password = hash_password(payload.new_password)
+    token_row.consumed_at = now
+    db.commit()
+
+    return {"message": "Password reset successful"}
+
+@app.post("/auth/email-verify/confirm")
+def email_verify_confirm(payload: schemas.EmailVerificationConfirm, db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    token_hash = hash_token(payload.token)
+
+    token_row = (
+        db.query(models.EmailVerificationToken)
+        .filter(models.EmailVerificationToken.token_hash == token_hash)
+        .with_for_update()
+        .first()
+    )
+    if not token_row:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+    if token_row.consumed_at is not None or token_row.expires_at < now:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+    user = db.query(models.User).get(token_row.user_id)
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+
+    user.status = "active"
+    token_row.consumed_at = now
+    db.commit()
+
+    return { "message": "Email verified successfully. You can now sign in."}
+
+@app.post ("/auth/email-verify/resend", status_code=202)
+def email_verify_resend(
+    payload: schemas.EmailVerificationResend,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    generic = {"message": "If that account exists and is pending verification, a new verification code has been sent."}
+
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    if not user or (user.status or "").lower() != "pending_email_verification":
+        return generic
+    
+    now = datetime.utcnow()
+    db.query(models.EmailVerificationToken).filter(
+        models.EmailVerificationToken.user_id == user.id,
+        models.EmailVerificationToken.consumed_at.is_(None),
+    ).update({"consumed_at": now}, synchronize_session=False)
+
+    raw_code = generate_auth_code()
+    db.add(models.EmailVerificationToken(
+        user_id=user.id,
+        token_hash=hash_token(raw_code),
+        expires_at=now + timedelta(minutes=_email_verify_ttl_minutes()),
+        requested_ip=(request.client.host if request and request.client else None),
+        requested_user_agent=(request.headers.get("user-agent") if request else None),
+    ))
+    db.commit()
+
+    try:
+        if user.discord_id:
+            background_tasks.add_task(
+                send_direct_discord_dm,
+                user.discord_id,
+                f"Your account verification code is: {raw_code}\nIt expires in {_email_verify_ttl_minutes()} minutes.",
+            )
+        else:
+            send_email_verification_email(
+                to_email=user.email,
+                verify_url=_build_verify_link(raw_code),
+                ttl_minutes=_email_verify_ttl_minutes(),
+            )
+    except Exception as exc:
+        logger.exception("Failed to resend verification notification: %s", exc)
+    
+    return generic
+        
+
+'''
+    Parameters:
+    - q: Search string
+    - limit: Max number of results (1-20)
+    - db: Database session
+
+    Outputs:
+    - List of user summary objects
+
+    Use:
+    - Search users by username substring for autocomplete.
+'''
 @app.get("/users/search")
 @app.get("/api/users/search")
 def search_users(q: str, limit: int = 10, db: Session = Depends(get_db)):
@@ -321,6 +745,18 @@ def search_users(q: str, limit: int = 10, db: Session = Depends(get_db)):
 
 
 # ================ Public Devices Endpoint (View Only) ================
+'''
+    Parameters:
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - List of Device model instances
+    - HTTP 401 when unauthenticated
+
+    Use:
+    - Returns all devices for authenticated users to view.
+'''
 @app.get("/api/devices")
 @app.get("/devices")
 def get_devices(request: Request, db: Session = Depends(get_db)):
@@ -329,8 +765,8 @@ def get_devices(request: Request, db: Session = Depends(get_db)):
     All authenticated users can view devices to make bookings.
     Only admins can manage devices (via /admin/devices).
     """
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     devices = db.query(models.Device).all()
@@ -338,9 +774,25 @@ def get_devices(request: Request, db: Session = Depends(get_db)):
 
 
 # ================ Client Registration ================
-@app.post("/users/register", response_model=schemas.User)
+'''
+    Parameters:
+    - user: UserCreate payload
+    - db: Database session
+    - request: Incoming HTTP request (session access)
+
+    Outputs:
+    - User model instance
+    - HTTP 400 when username is taken
+
+    Use:
+    - Registers a new user and starts a session.
+'''
+@app.post("/users/register", status_code=200, response_model=schemas.User)
 def register_user(
-    user: schemas.UserCreate, db: Session = Depends(get_db), request: Request = None
+    user: schemas.UserCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    request: Request = None,
 ):
 
     # Check if username is taken
@@ -350,38 +802,99 @@ def register_user(
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already taken.")
 
+    existing_email = db.query(models.User).filter(models.User.email == user.email).first()
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already in use.")
+        
+    normalized_email = user.email.strip().lower()
     # Hash the password
     # Client sends SHA256 hash, so we store bcrypt(SHA256) for security
     # This way verify_password(SHA256, bcrypt(SHA256)) will work
     hashed_pass = hash_password(user.password)
 
-    # Create new user
+    # Create new user in pending verification state
     new_user = models.User(
         username=user.username,
-        email=user.email,
+        email=normalized_email,
+        discord_id=user.discord_id,
+        firstName=user.firstName.strip(),
+        lastName=user.lastName.strip(),
         password=hashed_pass,
+        role="viewer",
+        status="pending_email_verification",
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    # Set the session
-    request.session["user_id"] = new_user.id
+    raw_code = generate_auth_code()
+    db.query(models.EmailVerificationToken).filter(
+        models.EmailVerificationToken.user_id == new_user.id,
+        models.EmailVerificationToken.consumed_at.is_(None),
+    ).update({"consumed_at": datetime.utcnow()}, synchronize_session=False)
 
-    return new_user
+    token_row = models.EmailVerificationToken(
+        user_id=new_user.id,
+        token_hash=hash_token(raw_code),
+        expires_at=datetime.utcnow() + timedelta(minutes=_email_verify_ttl_minutes()),
+        requested_ip=(request.client.host if request and request.client else None),
+        requested_user_agent=(request.headers.get("user-agent") if request else None),
+    )
+    db.add(token_row)
+    db.commit()
+
+    try:
+        if new_user.discord_id:
+            background_tasks.add_task(
+                send_direct_discord_dm,
+                new_user.discord_id,
+                f"Welcome {new_user.username}! Your account verification code is: {raw_code}\nEnter this code in the app to finish registration.",
+            )
+        else:
+            send_email_verification_email(
+                to_email=new_user.email,
+                verify_url=_build_verify_link(raw_code),
+                ttl_minutes=_email_verify_ttl_minutes(),
+            )
+    except Exception as exc:
+        logger.exception("Failed to send verification code: %s", exc)
+
+    return {
+        "id": new_user.id,
+        "username": new_user.username,
+        "email": new_user.email,
+        "role": new_user.role,
+        "discord_id": new_user.discord_id,
+    }
 
 
 # ================ User Login ================
+'''
+    Parameters:
+    - login_data: UserLogin payload
+    - db: Database session
+    - request: Incoming HTTP request (session access)
+
+    Outputs:
+    - JSON object with sign-in confirmation
+    - HTTP 400 on invalid credentials
+
+    Use:
+    - Authenticates a user and stores session user_id.
+'''
 @app.post("/login")
 def login_user(
     login_data: schemas.UserLogin,
     db: Session = Depends(get_db),
     request: Request = None,
 ):
-
     user = (
         db.query(models.User)
-        .filter(models.User.username == login_data.username)
+        .filter(
+            or_(models.User.username == login_data.username,
+                models.User.email == login_data.username,
+            )
+        )
         .first()
     )
     
@@ -404,25 +917,97 @@ def login_user(
 
     if not password_valid:
         raise HTTPException(status_code=400, detail="Invalid username or password")
+    
+    status_value = (user.status or "").lower()
+    if status_value == "pending_email_verification":
+        raise HTTPException(status_code=403, detail="Email verification required")
+    if status_value != "active":
+        raise HTTPException(status_code=403, detail="Account is inactive")
+    now = datetime.now(IRELAND_TZ)
+    user.previous_login_at = user.last_login_at
+    user.last_login_at = now
+    db.commit()
 
     # Store the user_id in Session
-    request.session["user_id"] = user.id
-    logger.info(f"User {user.username} (ID: {user.id}) logged in successfully. Session set.")
+    session_id = create_user_session(db, user.id, request)
 
-    return {"message": "Sign in successful", "user_id": user.id}
-
-
-# ================ User Logout ================
-@app.post("/logout")
-def logout_user(request: Request, response: Response):
-    request.session.clear()
-
-    response = JSONResponse({"message": "Signed out successfully"})
-    response.delete_cookie("session_id")
+    response = JSONResponse({"message": "Sign in successful", "user_id": user.id})
+    response.set_cookie(
+        key="session_id",
+        value=session_id,
+        max_age=3600*24*7,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/"
+    )
     return response
 
 
+# ================ User Logout ================
+'''
+    Parameters:
+    - request: Incoming HTTP request (session access)
+    - response: HTTP response
+
+    Outputs:
+    - JSON response confirming sign-out
+
+    Use:
+    - Clears the session and deletes the session cookie.
+'''
+@app.post("/logout")
+def logout_user(request: Request, db: Session = Depends(get_db)):
+    revoke_session_by_cookie(db, request)
+
+    # Update secure to true and httponly to false if HTTPS
+    response = JSONResponse({"message": "Signed out successfully"})
+    response.delete_cookie("session_id", path="/", samesite="lax", secure=False, httponly=True)
+    return response
+
+def record_logs(
+    db: Session,
+    *,
+    actor_id: Optional[int],
+    actor_role: Optional[str],
+    action: str,
+    entity_type: str,
+    entity_id: Optional[str] = None,
+    payload: Optional[dict[str, Any]] = None,
+    outcome: str,
+    message: Optional[str] = None,
+    created_at: Optional[datetime] = None,
+) -> models.AdminAuditLog:
+    row = models.AdminAuditLog(
+        actor_id = actor_id,            # the user id
+        actor_role = actor_role,        # the users role (Viewer/admin)
+        action = action,                # e.g. "submit_booking"
+        entity_type = entity_type,      # e.g. "booking"
+        entity_id = entity_id,          # booking id or something to link back to the effected action
+        payload = payload,              # e.g. device count/messages
+        outcome = outcome,              # success/failure
+        message = message,              # some message by the system (probably the response to a fail)
+    )
+    if created_at is not None:
+        row.created_at = created_at
+    db.add(row)
+    return row
+
 # ================ Bookings: Single & Multiple Time Slot ================
+'''
+    Parameters:
+    - req: BookingsRequest payload
+    - background_tasks: FastAPI background task handler
+    - db: Database session
+
+    Outputs:
+    - JSON summary of created bookings and grouped ID
+    - HTTPException on validation or DB errors
+
+    Use:
+    - Creates one or more bookings and collaborator copies.
+    - Sends a booking-created notification asynchronously.
+'''
 @app.post("/bookings")
 @app.post("/api/bookings")
 async def create_bookings(
@@ -444,6 +1029,8 @@ async def create_bookings(
 
     grouped_booking_id = req.grouped_booking_id or str(uuid.uuid4())
     count_inserted = 0
+    created_booking_ids: list[int] = []
+
     try:
         for b in req.bookings:
             # Use with_for_update to lock this recording
@@ -484,6 +1071,15 @@ async def create_bookings(
                     db.rollback()
                     raise HTTPException(status_code=500, detail="Database error")
 
+            requested_status = (b.status or "PENDING").upper()
+
+            overlapping_owners = _find_overlapping_owner_bookings(
+                db, device.id, b.start_time, b.end_time
+            )
+
+            has_overlap_conflict = len(overlapping_owners) > 0
+            final_status = "CONFLICTING" if (requested_status == "CONFLICTING" or has_overlap_conflict) else requested_status
+
             # Create this booking
             new_booking = models.Booking(
                 device_id=device.id,
@@ -491,14 +1087,22 @@ async def create_bookings(
                 is_collaborator=False,
                 start_time=b.start_time,
                 end_time=b.end_time,
-                status=b.status,
+                status=final_status,
                 comment=req.message,
+                status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None),
                 collaborators=collaborator_usernames
-                if collaborator_usernames
-                else None,
+                if collaborator_usernames else None,
                 grouped_booking_id=grouped_booking_id,
             )
             db.add(new_booking)
+            db.flush()
+            created_booking_ids.append(new_booking.booking_id)
+
+            if final_status == "CONFLICTING":
+                _mark_slot_group_status(db, new_booking, "CONFLICTING")
+                for existing_owner in overlapping_owners:
+                    _mark_slot_group_status(db, existing_owner, "CONFLICTING")
+
             count_inserted += 1
 
             if collaborator_users:
@@ -540,10 +1144,74 @@ async def create_bookings(
 
     except HTTPException as he:
         db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = req.user_id,
+                actor_role = req.role,
+                action = "submit_bookings",
+                entity_type = "booking",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "requested_slots": len(req.bookings or []),
+                    "collaborators": req.collaborators or [],
+                },
+                outcome = "failure",
+                message = f"Booking submsission failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for booking failure")
         raise he
     except Exception as e:
         db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = req.user_id,
+                actor_role = req.role,
+                action = "submit_bookings",
+                entity_type = "booking",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "requested_slots": len(req.bookings or []),
+                    "collaborators": req.collaborators or [],
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Booking submission failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for unexpected booking failure")
         raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = user.id,
+            actor_role = user.role,
+            action = "submit_bookings",
+            entity_type = "booking",
+            entity_id = str(created_booking_ids[0]) if created_booking_ids else None,
+            payload = {
+                "booking_ids": created_booking_ids,
+                "grouped_booking_id": grouped_booking_id,
+                "requested_slots": len(req.bookings),
+                "inserted_count": count_inserted,
+                "collaborators": collaborator_usernames,
+                "message": req.message,
+            },
+            outcome = "success",
+            message = f"Created {count_inserted} booking(s)",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for submit_bookings success")
 
     background_tasks.add_task(send_booking_created_notification, content)
 
@@ -555,6 +1223,21 @@ async def create_bookings(
 
 
 # ================ Cancel Bookings ================
+'''
+    Parameters:
+    - booking_id: ID of the booking to cancel
+    - payload: Optional BookingCancelRequest (includes user_id)
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming cancellation
+    - HTTPException on errors or authorization failures
+
+    Use:
+    - Cancels a booking and any related collaborator bookings.
+    - Updates overlapping booking status if needed.
+'''
 @app.put("/bookings/{booking_id}/cancel")
 @app.put("/api/bookings/{booking_id}/cancel")
 def cancel_booking(
@@ -591,64 +1274,145 @@ def cancel_booking(
     if payload and payload.user_id is not None:
         acting_user_id = payload.user_id
     elif request is not None:
-        acting_user_id = request.session.get("user_id")
+        acting_user = get_user_from_session_cookie(db, request)
 
-    if acting_user_id is None:
+    if acting_user.id is None:
         raise HTTPException(
             status_code=400, detail="User ID is required to cancel this booking."
         )
 
-    if acting_user_id != owner_booking.user_id:
+    if acting_user.id != owner_booking.user_id:
         raise HTTPException(
             status_code=403, detail="Only the booking owner can cancel this booking."
         )
 
-    related_bookings = (
-        db.query(models.Booking)
-        .filter(
-            models.Booking.grouped_booking_id == booking.grouped_booking_id,
-            models.Booking.device_id == booking.device_id,
-            models.Booking.start_time == booking.start_time,
-            models.Booking.end_time == booking.end_time,
+    actor_role = acting_user.role
+    try: 
+        related_bookings = (
+            db.query(models.Booking)
+            .filter(
+                models.Booking.grouped_booking_id == booking.grouped_booking_id,
+                models.Booking.device_id == booking.device_id,
+                models.Booking.start_time == booking.start_time,
+                models.Booking.end_time == booking.end_time,
+            )
+            .all()
         )
-        .all()
-    )
 
-    if all(rb.status == "CANCELLED" for rb in related_bookings):
-        raise HTTPException(status_code=400, detail="Booking is already cancelled")
+        if all(rb.status == "CANCELLED" for rb in related_bookings):
+            raise HTTPException(status_code=400, detail="Booking is already cancelled")
 
-    updated_booking_ids: List[int] = []
-    for record in related_bookings:
-        if record.status != "CANCELLED":
-            record.status = "CANCELLED"
-            updated_booking_ids.append(record.booking_id)
+        updated_booking_ids: List[int] = []
+        for record in related_bookings:
+            if record.status != "CANCELLED":
+                record.status = "CANCELLED"
+                record.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
+                updated_booking_ids.append(record.booking_id)
 
-    if updated_booking_ids:
-        _delete_device_booking_rows(db, updated_booking_ids)
-    db.commit()
+        if updated_booking_ids:
+            _delete_device_booking_rows(db, updated_booking_ids)
+        db.commit()
 
-    # Then re-check the same time-slot of device, if there is only one booking, change it to be pending
-    overlapping = (
-        db.query(models.Booking)
-        .filter(
-            models.Booking.device_id == booking.device_id,
-            models.Booking.start_time < booking.end_time,
-            models.Booking.end_time > booking.start_time,
-            models.Booking.is_collaborator.is_(False),
-            models.Booking.status.notin_(["CANCELLED", "EXPIRED"]),
+        # Then re-check the same time-slot of device, if there is only one booking, change it to be pending
+        overlapping = (
+            db.query(models.Booking)
+            .filter(
+                models.Booking.device_id == booking.device_id,
+                models.Booking.start_time < booking.end_time,
+                models.Booking.end_time > booking.start_time,
+                models.Booking.is_collaborator.is_(False),
+                models.Booking.status.notin_(["CANCELLED", "EXPIRED"]),
+            )
+            .all()
         )
-        .all()
-    )
 
-    if len(overlapping) == 1:
-        remaining = overlapping[0]
-        if remaining.status == "CONFLICTING":
-            remaining.status = "PENDING"
+        downgraded_booking_id = None
+
+        if len(overlapping) == 1:
+            remaining = overlapping[0]
+            if remaining.status == "CONFLICTING":
+                remaining.status = "PENDING"
+                remaining.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
+                downgraded_booking_id = remaining.booking_id
+                db.commit()
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = acting_user_id,
+                actor_role = actor_role,
+                action = "cancel_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "grouped_bookings_id": booking.grouped_booking_id,
+                    "device_id": booking.device_id,
+                },
+                outcome = "failure",
+                message = f"Cancel booking failed: {he.detail}",
+            )
             db.commit()
+        except Exception as e:
+            db.rollback()
+            try:
+                record_logs(
+                    db, 
+                    actor_id = acting_user_id,
+                    actor_role = actor_role,
+                    action = "cancel_bookings",
+                    entity_type = "booking",
+                    entity_id = str(booking_id),
+                    payload = {
+                        "grouped_booking_id": booking.grouped_booking_id,
+                        "device_id": booking.device_id,
+                        "error": str(e),
+                    },
+                    outcome = "failure",
+                    message = "Cancel booking failed with unexpected error",
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("failed to write audit log for cancel_booking unexpected failure")
+            raise HTTPException(status_code = 500, detail = str(e))
+        try: 
+            record_logs(
+                db, 
+                actor_id = acting_user_id,
+                actor_role = actor_role,
+                action = "cancel_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "grouped_booking_id": booking.grouped_booking_id,
+                    "cancelled_booking_ids": updated_booking_ids,
+                    "conflicting_downgraded_booking_id": downgraded_booking_id,
+                },
+                outcome = "success",
+                message = f"Cancelled {len(updated_booking_ids)} booking(s) in slot",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("failed to write audit log for cancel_booking success")
 
     return {"message": f"Booking {booking_id} has been cancelled"}
 
+'''
+    Parameters:
+    - booking_id: ID of the booking to update
+    - payload: CollaboratorsUpdate payload containing new collaborators
+    - db: Database session
 
+    Outputs:
+    - JSON response with success message and updated collaborators
+    - HTTPException on errors
+
+    Use:
+    - Updates the collaborators for a booking and its related bookings.
+    - Creates new booking entries for collaborators as needed.
+'''
 @app.patch("/bookings/{booking_id}/collaborators")
 @app.patch("/api/bookings/{booking_id}/collaborators")
 def update_booking_collaborators(
@@ -667,50 +1431,123 @@ def update_booking_collaborators(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found.")
 
-    owner_bookings = [b for b in bookings if not b.is_collaborator]
-    if not owner_bookings:
-        raise HTTPException(
-            status_code=400,
-            detail="Unable to update collaborators without owner bookings.",
-        )
+    actor_role = owner.role
 
-    for booking in owner_bookings:
-        if booking.user_id != payload.owner_id:
+    try:
+        owner_bookings = [b for b in bookings if not b.is_collaborator]
+        if not owner_bookings:
             raise HTTPException(
-                status_code=403,
-                detail="Only the booking owner can update collaborators.",
-            )
-        if booking.status and booking.status.upper() == "CANCELLED":
-            raise HTTPException(
-                status_code=400, detail="Cannot update a cancelled booking."
+                status_code=400,
+                detail="Unable to update collaborators without owner bookings.",
             )
 
-    collaborator_usernames, collaborator_users = _resolve_collaborators(
-        db, owner.username, payload.collaborators or []
-    )
+        for booking in owner_bookings:
+            if booking.user_id != payload.owner_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the booking owner can update collaborators.",
+                )
+            if booking.status and booking.status.upper() == "CANCELLED":
+                raise HTTPException(
+                    status_code=400, detail="Cannot update a cancelled booking."
+                )
 
-    for owner_booking in owner_bookings:
-        owner_booking.collaborators = (
-            collaborator_usernames if collaborator_usernames else None
+        collaborator_usernames, collaborator_users = _resolve_collaborators(
+            db, owner.username, payload.collaborators or []
         )
 
-        related_collaborators = _fetch_collaborator_rows_for_slot(db, owner_booking)
-        existing_map = {row.user_id: row for row in related_collaborators}
-        desired_ids = {user.id for user in collaborator_users}
+        for owner_booking in owner_bookings:
+            owner_booking.collaborators = (
+                collaborator_usernames if collaborator_usernames else None
+            )
 
-        for user_id, row in list(existing_map.items()):
-            if user_id not in desired_ids:
-                db.delete(row)
+            related_collaborators = _fetch_collaborator_rows_for_slot(db, owner_booking)
+            existing_map = {row.user_id: row for row in related_collaborators}
+            desired_ids = {user.id for user in collaborator_users}
 
-        missing_users = [
-            collaborator
-            for collaborator in collaborator_users
-            if collaborator.id not in existing_map
-        ]
-        if missing_users:
-            _create_collaborator_copies(db, owner_booking, missing_users)
+            for user_id, row in list(existing_map.items()):
+                if user_id not in desired_ids:
+                    db.delete(row)
 
-    db.commit()
+            missing_users = [
+                collaborator
+                for collaborator in collaborator_users
+                if collaborator.id not in existing_map
+            ]
+            if missing_users:
+                _create_collaborator_copies(db, owner_booking, missing_users)
+
+        db.commit()
+
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.owner_id,
+                actor_role = actor_role,
+                action = "update_booking_collaborators",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "owner_id": payload.owner_id,
+                    "collaborators": payload.collaborators or [],
+                },
+                outcome = "failure",
+                message = f"Update booking collaborators failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for update_booking_collaborators failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.owner_id,
+                actor_role = actor_role,
+                action = "update_booking_collaborators",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "owner_id": payload.owner_id,
+                    "collaborators": payload.collaborators or [],
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Update booking collaborators failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for update_booking_collaborators unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.owner_id,
+            actor_role = actor_role,
+            action = "update_booking_collaborators",
+            entity_type = "booking",
+            entity_id = str(booking_id),
+            payload = {
+                "booking_ids": target_ids,
+                "owner_id": payload.owner_id,
+                "collaborators": collaborator_usernames,
+            },
+            outcome = "success",
+            message = "Collaborators updated successfully.",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for update_booking_collaborators success")
 
     return {
         "message": "Collaborators updated successfully.",
@@ -718,6 +1555,21 @@ def update_booking_collaborators(
     }
 
 
+'''
+    Parameters:
+    - booking_id: ID of the booking to rebook
+    - payload: RebookRequest payload
+    - background_tasks: FastAPI background task handler
+    - db: Database session
+
+    Outputs:
+    - JSON summary of created bookings
+    - HTTPException on validation or conflicts
+
+    Use:
+    - Recreates bookings in a new date range for the requester.
+    - Sends a booking-created notification asynchronously.
+'''
 @app.post("/bookings/rebook/{booking_id}")
 def rebook_booking(
     booking_id: int,
@@ -732,6 +1584,7 @@ def rebook_booking(
     requester = db.query(models.User).get(payload.user_id)
     if not requester:
         raise HTTPException(status_code=404, detail="Requesting user not found.")
+    actor_role = requester.role
 
     target_ids = payload.booking_ids or [booking_id]
     bookings = (
@@ -852,9 +1705,76 @@ def rebook_booking(
             )
             background_tasks.add_task(send_booking_created_notification, content)
 
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "rebook_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "start_date": payload.start_date.isoformat(),
+                    "end_date": payload.end_date.isoformat(),
+                },
+                outcome = "failure",
+                message = f"Rebook booking failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for rebook_booking failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "rebook_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "start_date": payload.start_date.isoformat(),
+                    "end_date": payload.end_date.isoformat(),
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Rebook booking failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for rebook_booking unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "rebook_bookings",
+            entity_type = "booking",
+            entity_id = str(booking_id),
+            payload = {
+                "booking_ids": target_ids,
+                "start_date": payload.start_date.isoformat(),
+                "end_date": payload.end_date.isoformat(),
+                "count": created,
+            },
+            outcome = "success",
+            message = f"Created {created} booking(s) successfully.",
+        )
+        db.commit()
     except Exception:
         db.rollback()
-        raise
+        logger.exception("Failed to write audit log for rebook_booking success")
 
     return {
         "message": f"Created {created} booking(s) successfully.",
@@ -862,6 +1782,19 @@ def rebook_booking(
     }
 
 
+'''
+    Parameters:
+    - booking_id: ID of the booking to extend
+    - payload: ExtendBookingRequest payload
+    - db: Database session
+
+    Outputs:
+    - JSON summary of updated bookings
+    - HTTPException on validation or conflicts
+
+    Use:
+    - Extends booking end times and keeps collaborators in sync.
+'''
 @app.patch("/bookings/{booking_id}/extend")
 def extend_booking(
     booking_id: int,
@@ -875,6 +1808,7 @@ def extend_booking(
     requester = db.query(models.User).get(payload.user_id)
     if not requester:
         raise HTTPException(status_code=404, detail="Requesting user not found.")
+    actor_role = requester.role
 
     target_ids = payload.booking_ids or [booking_id]
     bookings = (
@@ -974,9 +1908,73 @@ def extend_booking(
             updated += 1
 
         db.commit()
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "extend_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "new_end_date": payload.new_end_date.isoformat(),
+                },
+                outcome = "failure",
+                message = f"Extend booking failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for extend_booking failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "extend_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "booking_ids": target_ids,
+                    "new_end_date": payload.new_end_date.isoformat(),
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Extend booking failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for extend_booking unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "extend_bookings",
+            entity_type = "booking",
+            entity_id = str(booking_id),
+            payload = {
+                "booking_ids": target_ids,
+                "new_end_date": payload.new_end_date.isoformat(),
+                "count": updated,
+            },
+            outcome = "success",
+            message = f"Extended {updated} booking(s) successfully.",
+        )
+        db.commit()
     except Exception:
         db.rollback()
-        raise
+        logger.exception("Failed to write audit log for extend_booking success")
 
     return {
         "message": f"Extended {updated} booking(s) successfully.",
@@ -984,6 +1982,19 @@ def extend_booking(
     }
 
 
+'''
+    Parameters:
+    - grouped_booking_id: Group ID to cancel
+    - payload: GroupActionRequest payload
+    - db: Database session
+
+    Outputs:
+    - JSON summary of cancelled bookings
+    - HTTPException on errors or authorization failures
+
+    Use:
+    - Cancels all bookings in a group.
+'''
 @app.delete("/api/bookings/group/{grouped_booking_id}")
 def cancel_booking_group(
     grouped_booking_id: str,
@@ -1010,16 +2021,88 @@ def cancel_booking_group(
             status_code=403,
             detail="Only the booking owner can cancel this booking group.",
         )
+    actor_user = db.query(models.User).get(payload.user_id)
+    actor_role = actor_user.role
 
-    updated_booking_ids: List[int] = []
-    for booking in bookings:
-        if booking.status != "CANCELLED":
-            booking.status = "CANCELLED"
-            updated_booking_ids.append(booking.booking_id)
+    try:
+        updated_booking_ids: List[int] = []
+        for booking in bookings:
+            if booking.status != "CANCELLED":
+                booking.status = "CANCELLED"
+                booking.status_updated_at = datetime.now(IRELAND_TZ).replace(tzinfo=None)
+                updated_booking_ids.append(booking.booking_id)
 
-    if updated_booking_ids:
-        _delete_device_booking_rows(db, updated_booking_ids)
-    db.commit()
+        if updated_booking_ids:
+            _delete_device_booking_rows(db, updated_booking_ids)
+        db.commit()
+
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "cancel_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "booking_ids": [b.booking_id for b in bookings],
+                    "grouped_booking_id": grouped_booking_id,
+                },
+                outcome = "failure",
+                message = f"Cancel booking group failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for cancel_booking_group failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "cancel_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "booking_ids": [b.booking_id for b in bookings],
+                    "grouped_booking_id": grouped_booking_id,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Cancel booking group failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for cancel_booking_group unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "cancel_booking_group",
+            entity_type = "booking",
+            entity_id = grouped_booking_id,
+            payload = {
+                "booking_ids": [b.booking_id for b in bookings],
+                "cancelled_booking_ids": updated_booking_ids,
+                "grouped_booking_id": grouped_booking_id,
+            },
+            outcome = "success",
+            message = f"Cancelled booking group {grouped_booking_id}.",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for cancel_booking_group success")
 
     return {
         "message": f"Cancelled booking group {grouped_booking_id}.",
@@ -1027,6 +2110,19 @@ def cancel_booking_group(
     }
 
 
+'''
+    Parameters:
+    - grouped_booking_id: Group ID to extend
+    - payload: GroupExtendRequest payload
+    - db: Database session
+
+    Outputs:
+    - JSON summary of added bookings
+    - HTTPException on validation or conflicts
+
+    Use:
+    - Extends a booking group by generating additional slots.
+'''
 @app.patch("/api/bookings/group/{grouped_booking_id}/extend")
 def extend_booking_group(
     grouped_booking_id: str,
@@ -1053,6 +2149,8 @@ def extend_booking_group(
             status_code=403,
             detail="Only the booking owner can extend this booking group.",
         )
+    actor_user = db.query(models.User).get(payload.user_id)
+    actor_role = actor_user.role
 
     owner_bookings = [b for b in all_bookings if not b.is_collaborator]
 
@@ -1142,9 +2240,73 @@ def extend_booking_group(
                 next_date += timedelta(days=1)
 
         db.commit()
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "extend_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "new_end_date": payload.new_end_date.isoformat(),
+                },
+                outcome = "failure",
+                message = f"Extend booking group failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for extend_booking_group failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "extend_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "new_end_date": payload.new_end_date.isoformat(),
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Extend booking group failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for extend_booking_group unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "extend_booking_group",
+            entity_type = "booking",
+            entity_id = grouped_booking_id,
+            payload = {
+                "grouped_booking_id": grouped_booking_id,
+                "new_end_date": payload.new_end_date.isoformat(),
+                "count": added,
+            },
+            outcome = "success",
+            message = f"Extended booking group {grouped_booking_id} by {added} slot(s).",
+        )
+        db.commit()
     except Exception:
         db.rollback()
-        raise
+        logger.exception("Failed to write audit log for extend_booking_group success")
 
     return {
         "message": f"Extended booking group {grouped_booking_id} by {added} slot(s).",
@@ -1152,6 +2314,21 @@ def extend_booking_group(
     }
 
 
+'''
+    Parameters:
+    - grouped_booking_id: Group ID to rebook
+    - payload: GroupRebookRequest payload
+    - background_tasks: FastAPI background task handler
+    - db: Database session
+
+    Outputs:
+    - JSON summary of created bookings and new group ID
+    - HTTPException on validation or conflicts
+
+    Use:
+    - Recreates an entire booking group across a new date range.
+    - Sends a booking-created notification asynchronously.
+'''
 @app.post("/api/bookings/group/{grouped_booking_id}/rebook")
 def rebook_booking_group(
     grouped_booking_id: str,
@@ -1179,6 +2356,8 @@ def rebook_booking_group(
             status_code=403,
             detail="Only the booking owner can rebook this booking group.",
         )
+    actor_user = db.query(models.User).get(payload.user_id)
+    actor_role = actor_user.role
 
     if payload.end_date < payload.start_date:
         raise HTTPException(
@@ -1284,9 +2463,77 @@ def rebook_booking_group(
             )
             background_tasks.add_task(send_booking_created_notification, content)
 
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "rebook_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "start_date": payload.start_date.isoformat(),
+                    "end_date": payload.end_date.isoformat(),
+                },
+                outcome = "failure",
+                message = f"Rebook booking group failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for rebook_booking_group failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "rebook_booking_group",
+                entity_type = "booking",
+                entity_id = grouped_booking_id,
+                payload = {
+                    "grouped_booking_id": grouped_booking_id,
+                    "start_date": payload.start_date.isoformat(),
+                    "end_date": payload.end_date.isoformat(),
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Rebook booking group failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for rebook_booking_group unexpected failure")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user_id,
+            actor_role = actor_role,
+            action = "rebook_booking_group",
+            entity_type = "booking",
+            entity_id = new_grouped_id,
+            payload = {
+                "grouped_booking_id": grouped_booking_id,
+                "new_grouped_booking_id": new_grouped_id,
+                "start_date": payload.start_date.isoformat(),
+                "end_date": payload.end_date.isoformat(),
+                "count": created,
+            },
+            outcome = "success",
+            message = f"Created {created} booking(s) successfully.",
+        )
+        db.commit()
     except Exception:
         db.rollback()
-        raise
+        logger.exception("Failed to write audit log for rebook_booking_group success")
 
     return {
         "message": f"Created {created} booking(s) successfully.",
@@ -1298,23 +2545,43 @@ def rebook_booking_group(
 # ================ Get one user's all bookings  ================
 
 
-@app.get("/bookings/user/{user_id}")
-def get_user_bookings(
-    user_id: int,
+'''
+    Parameters:
+    - user_id: User ID to fetch bookings for
+    - grouped: When true, return grouped booking sessions
+    - db: Database session
+
+    Outputs:
+    - List of booking records (grouped or raw)
+    - HTTPException on errors
+
+    Use:
+    - Returns bookings where the user is owner or collaborator.
+    - Updates expired booking statuses before returning results.
+'''
+@app.get("/bookings/my")
+def get_my_bookings(
     grouped: bool = Query(
         False, description="Return grouped booking sessions when true"
     ),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
 
-    user = db.query(models.User).get(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    # Get current user from session
+    current_user = get_user_from_session_cookie(db, request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    if (current_user.status or "").lower() != "active":
+        raise HTTPException(status_code=403, detail="Account not active")
+
+    user = current_user
 
     # Update the status of devices that are already expired but have not been updated
-    now = datetime.now()
+    now = datetime.now(IRELAND_TZ)
     db.query(models.Booking).filter(
-        models.Booking.user_id == user_id,
+        models.Booking.user_id == user.id,
         models.Booking.end_time < now,
         ~models.Booking.status.in_(
             ["CANCELLED", "EXPIRED"]
@@ -1328,8 +2595,8 @@ def get_user_bookings(
         db.query(models.Booking)
         .filter(
             or_(
-                models.Booking.user_id == user_id,
-                models.Booking.collaborators != None,  # noqa: E711
+                models.Booking.user_id == user.id,
+                models.Booking.collaborators.contains([user.username])
             )
         )
         .order_by(models.Booking.created_at.desc(), models.Booking.start_time.asc())
@@ -1341,6 +2608,16 @@ def get_user_bookings(
     owner_booking_cache: dict[str, Optional[models.Booking]] = {}
     owner_collaborators_cache: dict[str, List[str]] = {}
 
+    '''
+        Parameters:
+        - group_id: Grouped booking ID
+
+        Outputs:
+        - Owner booking instance or None
+
+        Use:
+        - Loads and caches the owner booking for a group.
+    '''
     def ensure_owner_entry(group_id: str) -> Optional[models.Booking]:
         entry = owner_booking_cache.get(group_id)
         if entry is not None and not entry.is_collaborator:
@@ -1378,7 +2655,7 @@ def get_user_bookings(
         if effective_collaborators is None:
             effective_collaborators = []
 
-        is_owner = (not booking.is_collaborator) and (booking.user_id == user_id)
+        is_owner = (not booking.is_collaborator) and (booking.user_id == user.id)
         is_collaborator = booking.is_collaborator or (
             not is_owner and user.username in effective_collaborators
         )
@@ -1424,10 +2701,16 @@ def get_user_bookings(
                 "end_date": booking.end_time.date(),
                 "created_at": booking.created_at,
                 "statuses": set(),
+                "comments": set(),
+                "status_updated_at": booking.status_updated_at or booking.created_at,
                 "is_owner": is_owner,
                 "is_collaborator": is_collaborator,
             }
         group = groups[group_id]
+
+        booking_updated_at = booking.status_updated_at or booking.created_at
+        if booking_updated_at > group["status_updated_at"]:
+            group["status_updated_at"] = booking_updated_at
 
         if booking.start_time.date() < group["start_date"]:
             group["start_date"] = booking.start_time.date()
@@ -1436,6 +2719,11 @@ def get_user_bookings(
 
         if booking.created_at < group["created_at"]:
             group["created_at"] = booking.created_at
+        
+        if booking.comment:
+            stripped_comment = booking.comment.strip()
+            if stripped_comment:
+                group["comments"].add(stripped_comment)
 
         group["statuses"].add((booking.status or "").upper())
         combined_collabs = set(group["collaborators"] or [])
@@ -1460,6 +2748,16 @@ def get_user_bookings(
         )
         device_entry["dates"].add(booking.start_time.date().isoformat())
 
+    '''
+        Parameters:
+        - statuses: Set of booking status values
+
+        Outputs:
+        - Derived group status string
+
+        Use:
+        - Collapses multiple statuses into a single group-level status.
+    '''
     def derive_status(statuses: set[str]) -> str:
         upper_statuses = {s.upper() for s in statuses if s}
         if not upper_statuses:
@@ -1470,10 +2768,12 @@ def get_user_bookings(
             return "CANCELLED"
         if any(s in {"REJECTED", "DECLINED"} for s in upper_statuses):
             return "DECLINED"
-        if any(s == "EXPIRED" for s in upper_statuses):
-            return "EXPIRED"
-        if any(s in {"PENDING", "CONFLICTING"} for s in upper_statuses):
+        if any(s == "PENDING" for s in upper_statuses):
             return "PENDING"
+        if any(s in {"EXPIRED"} for s in upper_statuses):
+            return "EXPIRED"
+        if any(s == "CONFLICTING" for s in upper_statuses):
+            return "CONFLICTING"
         if any(s in {"APPROVED", "CONFIRMED"} for s in upper_statuses):
             return "APPROVED"
         return next(iter(upper_statuses))
@@ -1501,6 +2801,8 @@ def get_user_bookings(
                 "end_date": group["end_date"].isoformat(),
                 "created_at": group["created_at"].isoformat(),
                 "status": derive_status(group["statuses"]),
+                "status_updated_at": group["status_updated_at"].isoformat(),
+                "comments": sorted(group["comments"]),
                 "devices": devices,
                 "device_count": len(devices),
                 "booking_ids": sorted(group["booking_ids"]),
@@ -1519,17 +2821,44 @@ def get_user_bookings(
 
 
 # ================ Booking Favorites ================
-@app.get("/bookings/favorites/{user_id}")
-def get_booking_favorites(user_id: int, db: Session = Depends(get_db)):
+'''
+    Parameters:
+    - user_id: User ID to fetch favorites for
+    - db: Database session
+
+    Outputs:
+    - List of booking favorites as dictionaries
+
+    Use:
+    - Returns saved booking favorites for a user.
+'''
+@app.get("/bookings/favorites/my")
+def get_my_booking_favorites(request: Request = None, db: Session = Depends(get_db)):
+    current_user = get_user_from_session_cookie(db, request)
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
     favorites = (
         db.query(models.BookingFavorite)
-        .filter(models.BookingFavorite.user_id == user_id)
+        .filter(models.BookingFavorite.user_id == current_user.id)
         .order_by(models.BookingFavorite.updated_at.desc())
         .all()
     )
     return [_favorite_to_dict(favorite) for favorite in favorites]
 
 
+'''
+    Parameters:
+    - payload: BookingFavoriteCreate payload
+    - db: Database session
+
+    Outputs:
+    - Booking favorite dictionary
+    - HTTPException if user not found
+
+    Use:
+    - Creates or updates a booking favorite for a user.
+'''
 @app.post("/bookings/favorites")
 def create_booking_favorite(
     payload: BookingFavoriteCreate, db: Session = Depends(get_db)
@@ -1537,38 +2866,119 @@ def create_booking_favorite(
     user = db.query(models.User).get(payload.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    actor_role = user.role
 
-    name = (payload.name or "").strip() or datetime.utcnow().strftime("%Y-%m-%d")
-    existing = (
-        db.query(models.BookingFavorite)
-        .filter(
-            models.BookingFavorite.user_id == payload.user_id,
-            models.BookingFavorite.grouped_booking_id == payload.grouped_booking_id,
+    favorite = None
+    try:
+        name = (payload.name or "").strip() or datetime.utcnow().strftime("%Y-%m-%d")
+        existing = (
+            db.query(models.BookingFavorite)
+            .filter(
+                models.BookingFavorite.user_id == payload.user_id,
+                models.BookingFavorite.grouped_booking_id == payload.grouped_booking_id,
+            )
+            .first()
         )
-        .first()
-    )
 
-    if existing:
-        existing.name = name
-        existing.device_snapshot = payload.device_snapshot
-        existing.updated_at = datetime.utcnow()
-        db.commit()
-        db.refresh(existing)
-        favorite = existing
-    else:
-        favorite = models.BookingFavorite(
-            user_id=payload.user_id,
-            name=name,
-            grouped_booking_id=payload.grouped_booking_id,
-            device_snapshot=payload.device_snapshot,
+        if existing:
+            existing.name = name
+            existing.device_snapshot = payload.device_snapshot
+            existing.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(existing)
+            favorite = existing
+        else:
+            favorite = models.BookingFavorite(
+                user_id=payload.user_id,
+                name=name,
+                grouped_booking_id=payload.grouped_booking_id,
+                device_snapshot=payload.device_snapshot,
+            )
+            db.add(favorite)
+            db.commit()
+            db.refresh(favorite)
+        
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db, 
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "create_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": payload.grouped_booking_id,
+                    "name": payload.name,
+                },
+                outcome = "failure",
+                message = f"Created booking favorite failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for create_booking_favorite failure")
+        raise he
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "create_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": pauload.grouped_booking_id,
+                    "name": payload.name,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Create booking favorite failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for create_booking_favorite unexpected booking failure")
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = payload.user.id,
+            actor_role = actor_role,
+            action = "create_booking_favorite",
+            entity_type = "booking_favorite",
+            entity_id = str(favorite.id) if favorite else None,
+            payload = {
+                "grouped_booking_id": payload.grouped_booking_id,
+                "name": favorite.name if favorite else payload.name,
+            },
+            outcome = "success",
+            message = "Booking favorite saved successfully",
         )
-        db.add(favorite)
         db.commit()
-        db.refresh(favorite)
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for created_booking_favorite success")
 
     return _favorite_to_dict(favorite)
 
 
+'''
+    Parameters:
+    - favorite_id: Favorite ID to update
+    - payload: BookingFavoriteUpdate payload
+    - db: Database session
+
+    Outputs:
+    - Updated booking favorite dictionary
+    - HTTPException if favorite not found
+
+    Use:
+    - Updates a booking favorite's name.
+'''
 @app.put("/bookings/favorites/{favorite_id}")
 def update_booking_favorite(
     favorite_id: int, payload: BookingFavoriteUpdate, db: Session = Depends(get_db)
@@ -1576,59 +2986,295 @@ def update_booking_favorite(
     favorite = db.query(models.BookingFavorite).get(favorite_id)
     if not favorite:
         raise HTTPException(status_code=404, detail="Favorite not found")
+    actor_role = favorite.role
+    try:
+        if payload.name is not None:
+            name = payload.name.strip()
+            favorite.name = name or datetime.utcnow().strftime("%Y-%m-%d")
+        favorite.updated_at = datetime.utcnow()
 
-    if payload.name is not None:
-        name = payload.name.strip()
-        favorite.name = name or datetime.utcnow().strftime("%Y-%m-%d")
-    favorite.updated_at = datetime.utcnow()
-
-    db.commit()
-    db.refresh(favorite)
+        db.commit()
+        db.refresh(favorite)
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = favorite.user_id,
+                actor_role = actor_role,
+                action = "update_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": favorite.grouped_booking_id,
+                    "name": payload.name,
+                },
+                outcome = "failure",
+                message = f"Update booking favorite failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for update_booking_favorite failure")
+        raise he
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = payload.user_id,
+                actor_role = actor_role,
+                action = "update_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = None,
+                payload = {
+                    "grouped_booking_id": payload.grouped_booking_id,
+                    "name": payload.name,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Update booking favorite failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for update_booking_favorite unexpected booking failure")
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = paylod.user_id,
+            actor_role = actor_role,
+            action = "update_booking_favorite",
+            entity_type = "booking_favorite",
+            entity_id = str(favorite.id) if favorite else None,
+            payload = {
+                "grouped_booking_id": payload.grouped_booking_id,
+                "name": favorite.name if favorite else payload.name,
+            },
+            outcome = "success",
+            message = f"Updated booking favorite successfully",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for update_booking_favorite success")
     return _favorite_to_dict(favorite)
 
 
+'''
+    Parameters:
+    - favorite_id: Favorite ID to delete
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming deletion
+    - HTTPException if favorite not found
+
+    Use:
+    - Deletes a saved booking favorite.
+'''
 @app.delete("/bookings/favorites/{favorite_id}")
 def delete_booking_favorite(favorite_id: int, db: Session = Depends(get_db)):
     favorite = db.query(models.BookingFavorite).get(favorite_id)
     if not favorite:
         raise HTTPException(status_code=404, detail="Favorite not found")
-    db.delete(favorite)
-    db.commit()
+    actor_user = db.query(models.User).get(favorite.user_id)
+    actor_role = actor_user.role
+    actor_id = favorite.user_id
+    try:
+        db.delete(favorite)
+        db.commit()
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = actor_id,
+                actor_role = actor_role,
+                action = "delete_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = str(favorite_id),
+                payload = {
+                    "favorite_id": favorite_id,
+                },
+                outcome = "failure",
+                message = f"Delete booking favorite failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for delete_booking_favorite failure")
+        raise he
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = actor_id,
+                actor_role = actor_role,
+                action = "delete_booking_favorite",
+                entity_type = "booking_favorite",
+                entity_id = str(favorite_id),
+                payload = {
+                    "favorite_id": favorite_id,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Delete booking favorite failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for unexpected delete_booking_favorite failure")
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = actor_id,
+            actor_role = actor_role,
+            action = "delete_booking_favorite",
+            entity_type = "booking_favorite",
+            entity_id = str(favorite_id),
+            payload = {
+                "favorite_id": favorite_id,
+            },
+            outcome = "success",
+            message = "Favorite removed",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for delete_booking_favorite success")
     return {"message": "Favorite removed"}
 
 
 # ================ Delete the expired or cancelled bookings  ================
+'''
+    Parameters:
+    - booking_id: ID of the booking to delete
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming deletion
+    - HTTPException if booking not found
+
+    Use:
+    - Deletes a booking and any related bookings in the same slot.
+'''
 @app.delete("/bookings/{booking_id}")
 def delete_booking(booking_id: int, db: Session = Depends(get_db)):
 
     booking = db.query(models.Booking).get(booking_id)
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found.")
-
-    related_bookings = (
-        db.query(models.Booking)
-        .filter(
-            models.Booking.grouped_booking_id == booking.grouped_booking_id,
-            models.Booking.device_id == booking.device_id,
-            models.Booking.start_time == booking.start_time,
-            models.Booking.end_time == booking.end_time,
+    actor_user = db.query(models.User).get(booking.user_id)
+    actor_role = actor_user.role
+    actor_id = booking.user_id
+    deleted_booking_ids: List[int] = []
+    try:
+        related_bookings = (
+            db.query(models.Booking)
+            .filter(
+                models.Booking.grouped_booking_id == booking.grouped_booking_id,
+                models.Booking.device_id == booking.device_id,
+                models.Booking.start_time == booking.start_time,
+                models.Booking.end_time == booking.end_time,
+            )
+            .all()
         )
-        .all()
-    )
-    if not related_bookings:
-        db.delete(booking)
-    else:
-        for record in related_bookings:
-            db.delete(record)
-    db.commit()
+        if not related_bookings:
+            db.delete(booking)
+        else:
+            for record in related_bookings:
+                db.delete(record)
+        db.commit()
+    
+    except HTTPException as he:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = actor_id,
+                actor_role = actor_role,
+                action = "delete_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "grouped_booking_id": booking.grouped_booking_id,
+                    "device_id": booking.device_id,
+                },
+                outcome = "failure",
+                message = f"Delete booking failed: {he.detail}",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for delete_booking failure")
+        raise he
+
+    except Exception as e:
+        db.rollback()
+        try:
+            record_logs(
+                db,
+                actor_id = actor_id,
+                actor_role = actor_role,
+                action = "delete_bookings",
+                entity_type = "booking",
+                entity_id = str(booking_id),
+                payload = {
+                    "grouped_booking_id": booking.grouped_booking_id,
+                    "device_id": booking.device_id,
+                    "error": str(e),
+                },
+                outcome = "failure",
+                message = "Booking deletion failed with unexpected error",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to write audit log for unexpected delete_booking failure")
+        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        record_logs(
+            db,
+            actor_id = actor_id,
+            actor_role = actor_role,
+            action = "delete_bookings",
+            entity_type = "booking",
+            entity_id = str(booking_id),
+            payload = {
+                "grouped_booking_id": booking.grouped_booking_id,
+                "deleted_booking_ids": deleted_booking_ids,
+            },
+            outcome = "success",
+            message = f"Booking {booking_id} deleted",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to write audit log for delete_bookings success")
     return {"message": f"Booking {booking_id} deleted."}
 
 
 # ================ Show all booking status  ================
+'''
+    Parameters:
+    - start: Week start date string (YYYY-MM-DD)
+    - db: Database session
+
+    Outputs:
+    - List of booking rows overlapping the week
+    - HTTPException on invalid input or load errors
+
+    Use:
+    - Returns bookings overlapping a given week and marks expired bookings.
+'''
 @app.get("/bookings/for-week")
 def get_bookings_for_week(start: str, db: Session = Depends(get_db)):
 
-    now = datetime.now()
+    now = datetime.now(IRELAND_TZ)
     db.query(models.Booking).filter(
         models.Booking.end_time < now,
         ~models.Booking.status.in_(["CANCELLED", "EXPIRED", "REJECTED"]),
@@ -1737,6 +3383,17 @@ def get_bookings_for_week(start: str, db: Session = Depends(get_db)):
 
 
 # ================== Confliction check ==================
+'''
+    Parameters:
+    - req: ConflictCheckRequest payload
+    - db: Database session
+
+    Outputs:
+    - List of DeviceConflict objects
+
+    Use:
+    - Computes booking and maintenance conflicts per device over a time window.
+'''
 @app.post("/check-conflicts", response_model=List[schemas.DeviceConflict])
 def check_conflicts(req: schemas.ConflictCheckRequest, db: Session = Depends(get_db)):
     results = []
@@ -1818,7 +3475,7 @@ def check_conflicts(req: schemas.ConflictCheckRequest, db: Session = Depends(get
                 day_iter += timedelta(days=1)
 
         # if device.status == "Maintenance" is true, which means that those slots will be unavailable.
-        if device.status.lower() == "maintenance":
+        if device.status and device.status.lower() in {"maintenance", "unavailable"}:
             # day by day => from req.start~req.end
             day_iter = req.start.date()
             while day_iter <= req.end.date():
@@ -1839,6 +3496,19 @@ def check_conflicts(req: schemas.ConflictCheckRequest, db: Session = Depends(get
 
 
 # ================== Topology Management ==================
+'''
+    Parameters:
+    - topology: TopologyCreate payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON response with new topology ID
+    - HTTPException on auth or validation errors
+
+    Use:
+    - Creates a new topology for the authenticated user.
+'''
 @app.post("/topology")
 def create_topology(
     topology: schemas.TopologyCreate,
@@ -1846,11 +3516,11 @@ def create_topology(
     db: Session = Depends(get_db),
 ):
     """Create a new topology"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    if user_id != topology.user_id:
+    if user.id != topology.user_id:
         raise HTTPException(
             status_code=403, detail="Cannot create topology for another user"
         )
@@ -1871,6 +3541,20 @@ def create_topology(
     }
 
 
+'''
+    Parameters:
+    - topology_id: Topology ID to update
+    - topology: TopologyUpdate payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming update
+    - HTTPException on auth or validation errors
+
+    Use:
+    - Updates an existing topology owned by the user.
+'''
 @app.put("/topology/{topology_id}")
 def update_topology(
     topology_id: int,
@@ -1879,15 +3563,15 @@ def update_topology(
     db: Session = Depends(get_db),
 ):
     """Update an existing topology"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     existing_topology = db.query(models.Topology).get(topology_id)
     if not existing_topology:
         raise HTTPException(status_code=404, detail="Topology not found")
 
-    if existing_topology.user_id != user_id:
+    if existing_topology.user_id != user.id:
         raise HTTPException(
             status_code=403, detail="Cannot update another user's topology"
         )
@@ -1895,7 +3579,7 @@ def update_topology(
     existing_topology.name = topology.name
     existing_topology.nodes = topology.nodes
     existing_topology.edges = topology.edges
-    existing_topology.updated_at = datetime.now()
+    existing_topology.updated_at = datetime.now(IRELAND_TZ)
 
     db.commit()
     db.refresh(existing_topology)
@@ -1905,6 +3589,19 @@ def update_topology(
     }
 
 
+'''
+    Parameters:
+    - topology_id: Topology ID to fetch
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON object containing topology details
+    - HTTPException on auth or not found
+
+    Use:
+    - Returns a single topology owned by the user.
+'''
 @app.get("/topology/{topology_id}")
 def get_topology(
     topology_id: int,
@@ -1912,15 +3609,15 @@ def get_topology(
     db: Session = Depends(get_db),
 ):
     """Get a specific topology"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     topology = db.query(models.Topology).get(topology_id)
     if not topology:
         raise HTTPException(status_code=404, detail="Topology not found")
 
-    if topology.user_id != user_id:
+    if topology.user_id != user.id:
         raise HTTPException(
             status_code=403, detail="Cannot access another user's topology"
         )
@@ -1937,6 +3634,19 @@ def get_topology(
     }
 
 
+'''
+    Parameters:
+    - user_id: User ID to list topologies for
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON list of topology summaries
+    - HTTPException on auth or authorization errors
+
+    Use:
+    - Lists all topologies for the authenticated user.
+'''
 @app.get("/topology/list")
 def list_topologies(
     user_id: int,
@@ -1944,11 +3654,11 @@ def list_topologies(
     db: Session = Depends(get_db),
 ):
     """List all topologies for a user"""
-    session_user_id = request.session.get("user_id")
-    if not session_user_id:
+    session_user = get_user_from_session_cookie(db, request)
+    if not session_user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    if session_user_id != user_id:
+    if session_user.id != user_id:
         raise HTTPException(
             status_code=403, detail="Cannot list another user's topologies"
         )
@@ -1973,6 +3683,19 @@ def list_topologies(
     }
 
 
+'''
+    Parameters:
+    - req: TopologyCheckRequest payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON map of mock availability statuses
+    - HTTPException on auth errors
+
+    Use:
+    - Provides a mocked availability check for topology nodes.
+'''
 @app.post("/topology/check-availability")
 def check_topology_availability(
     req: schemas.TopologyCheckRequest,
@@ -1980,8 +3703,8 @@ def check_topology_availability(
     db: Session = Depends(get_db),
 ):
     """Check availability for all devices in a topology (mocked for now)"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     # Mock availability check - randomly assign availability status
@@ -2013,6 +3736,19 @@ def check_topology_availability(
     return {"availability": availability}
 
 
+'''
+    Parameters:
+    - req: TopologyResolveRequest payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - TopologyResolveResponse with mappings
+    - HTTPException on auth or resolution errors
+
+    Use:
+    - Resolves logical topology to physical device mappings.
+'''
 @app.post("/topology/resolve")
 def resolve_topology(
     req: schemas.TopologyResolveRequest,
@@ -2020,8 +3756,8 @@ def resolve_topology(
     db: Session = Depends(get_db),
 ):
     """Resolve logical topology to physical device mappings using real topology resolver"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
@@ -2124,6 +3860,19 @@ def resolve_topology(
         )
 
 
+'''
+    Parameters:
+    - req: TopologySuggestRequest payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - TopologySuggestResponse with recommendations
+    - HTTPException on auth or recommendation errors
+
+    Use:
+    - Generates topology recommendations based on resolved mappings.
+'''
 @app.post("/topology/suggest")
 def suggest_topology_configurations(
     req: schemas.TopologySuggestRequest,
@@ -2131,8 +3880,8 @@ def suggest_topology_configurations(
     db: Session = Depends(get_db),
 ):
     """Suggest optimized topology configurations with recommendations"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
@@ -2246,6 +3995,19 @@ def suggest_topology_configurations(
         )
 
 
+'''
+    Parameters:
+    - req: AvailabilityForecastRequest payload
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - AvailabilityForecastResponse with per-device forecasts
+    - HTTPException on auth or forecasting errors
+
+    Use:
+    - Forecasts device availability probabilities.
+'''
 @app.post("/availability/forecast")
 def forecast_availability(
     req: schemas.AvailabilityForecastRequest,
@@ -2253,8 +4015,8 @@ def forecast_availability(
     db: Session = Depends(get_db),
 ):
     """Forecast availability probabilities for devices"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user.id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
@@ -2292,6 +4054,19 @@ def forecast_availability(
         )
 
 
+'''
+    Parameters:
+    - topology_id: Topology ID to delete
+    - request: Incoming HTTP request (session access)
+    - db: Database session
+
+    Outputs:
+    - JSON response confirming deletion
+    - HTTPException on auth or authorization errors
+
+    Use:
+    - Deletes a topology owned by the user.
+'''
 @app.delete("/topology/{topology_id}")
 def delete_topology(
     topology_id: int,
@@ -2299,15 +4074,15 @@ def delete_topology(
     db: Session = Depends(get_db),
 ):
     """Delete a topology"""
-    user_id = request.session.get("user_id")
-    if not user_id:
+    user = get_user_from_session_cookie(db, request)
+    if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     topology = db.query(models.Topology).get(topology_id)
     if not topology:
         raise HTTPException(status_code=404, detail="Topology not found")
 
-    if topology.user_id != user_id:
+    if topology.user_id != user.id:
         raise HTTPException(
             status_code=403, detail="Cannot delete another user's topology"
         )

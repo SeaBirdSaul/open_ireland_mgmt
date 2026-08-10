@@ -1,4 +1,5 @@
-// TODO: Implement color theme (placeholder)
+// Color definitions for the UI theme
+// Defines semantic colors used throughout the UI
 export const colors = {
   accent: 'hsl(270, 70%, 50%)',
   accentLight: 'hsl(270, 70%, 60%)',

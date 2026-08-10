@@ -1,3 +1,8 @@
+/**
+ * Main client interface for the Lab Scheduler application.
+ * Handles user authentication, dark mode, particle effects,
+ *    calendar interactions, booking submissions, and reservation management.
+ */
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import CryptoJS from 'crypto-js';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -10,6 +15,9 @@ import { API_BASE_URL } from '../config/api';
 import { ToastProvider, useToastContext } from '../contexts/ToastContext';
 import { useLiveUpdates } from '../hooks/useLiveUpdates';
 import AccessibilityMenu from '../components/AccessibilityMenu';
+import { fetchGroupedBookings } from '../services/bookingGroupsService';
+import StatusUpdate from './v2/StatusUpdatePopup';
+import { createPortal } from 'react-dom';
 const ParticleBackground = lazy(() => import('../components/ParticleBackground'));
 
 const SIDEBAR_PREFERENCE_STORAGE_KEY = 'scheduler_filters_sidebar_open';
@@ -27,19 +35,23 @@ function ClientV2Inner() {
   const location = useLocation();
 
   // Use centralized auth store
-  const { authenticated, userId, username: userName, isAdmin, loading: isCheckingAuth, refreshAuth, clearAuth } = useAuthStore();
+  const { authenticated, userId, username: userName, role, loading: isCheckingAuth, refreshAuth, clearAuth, previousLoginAt, lastLoginAt } = useAuthStore();
   
   // Use ref to track if auth refresh is in progress to prevent race conditions
   const authRefreshInProgress = useRef(false);
   const hasInitialized = useRef(false);
 
   const [darkMode, setDarkMode] = useState(false);
-  const [authModal, setAuthModal] = useState(null); // 'login' | 'register' | null
+  const [authModal, setAuthModal] = useState(null); // 'login' | 'register' | 'forgotRequest' | 'forgotConfirm' | 'verifyCionfirm' | 'verifyResend' | 'forgotSent' | null
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [logoutPending, setLogoutPending] = useState(false);
   const { setWeekStart, initializeDefaultTemplates } = useSchedulerStore();
   const [isFiltersOpen, setIsFiltersOpen] = useState(true);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [resetTokenFromUrl, setResetTokenFromUrl] = useState('');
+  const [verifyTokenFromUrl, setVerifyTokenFromUrl] = useState('');
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const [resetEmail, setResetEmail] = useState('');
   const [particlesEnabled, setParticlesEnabled] = useState(() => {
     const saved = localStorage.getItem('particlesEnabled');
     return saved !== null ? saved === 'true' : false; // Default to false
@@ -62,6 +74,7 @@ function ClientV2Inner() {
       ? `hsl(var(--background-hue), var(--background-saturation), calc(var(--background-lightness) - 50%))`
       : `hsl(var(--background-hue), var(--background-saturation), calc(var(--background-lightness) + 10%))`;
   });
+  const [statusUpdates, setStatusUpdates] = useState([]);
 
   useEffect(() => {
     const updateColors = () => {
@@ -86,6 +99,7 @@ function ClientV2Inner() {
   }, []);
 
   const toast = useToastContext();
+  const { error: showToastError } = useToastContext();
   const isAuthenticated = authenticated;
 
   // Safe refresh auth function that prevents race conditions
@@ -101,6 +115,50 @@ function ClientV2Inner() {
     }
   }, [refreshAuth]);
 
+  useEffect(() => {
+    if (!isAuthenticated || !userId || !previousLoginAt) return;
+
+    const shownKey = `status-updates-shown:${userId}:${lastLoginAt || 'unknown'}`;
+    if (sessionStorage.getItem(shownKey) === '1') return;
+
+    (async () => {
+      const groups = await fetchGroupedBookings(userId);
+      const since = new Date(previousLoginAt).getTime();
+
+      const updates = groups
+        .filter((g) => {
+          const updatedAt = g.status_updated_at ? new Date(g.status_updated_at).getTime() : 0;
+          const comments = Array.isArray(g.comments) ? g.comments : [];
+          const hasMaintenanceComment = comments.some((comment) => 
+            comment?.toLowerCase().includes('declined due to device maintenance')
+          );
+
+        return updatedAt > since && (g.status || '').toUpperCase() === 'DECLINED' && hasMaintenanceComment;
+        })
+        .map((g) => ({
+          grouped_booking_id: g.grouped_booking_id,
+          status: g.status,
+          status_updated_at: g.status_updated_at,
+          comments: g.comments || [],
+          device_count: g.device_count,
+        }))
+        .sort((a, b) => new Date(b.status_updated_at) - new Date(a.status_updated_at));
+
+      if(updates.length > 0) {
+        updates.forEach((update) => {
+          toast.warning(
+            update.device_count > 1
+              ? `A booking session was declined due to maintenance affecting ${update.device_count} devices.`
+              : 'A booking was declined due to maintenance.'
+          );
+        });
+
+        setStatusUpdates(updates);
+      }
+      sessionStorage.setItem(shownKey, '1');
+    })();
+  }, [isAuthenticated, userId, previousLoginAt, lastLoginAt]);
+
   // Clear navigation loading when location changes and auth check completes
   useEffect(() => {
     // Always check auth for /client route (but only if not already refreshing)
@@ -110,14 +168,26 @@ function ClientV2Inner() {
       }
       
       // Check if we were redirected from admin route and show toast
-      if (location.state?.adminRedirect) {
-        setTimeout(() => {
-          toast.error(location.state.adminRedirect);
-        }, 300); // Small delay to ensure toast context is ready
-      }
+      // if (location.state?.adminRedirect) {
+      //   setTimeout(() => {
+      //     toast.error(location.state.adminRedirect);
+      //   }, 3000); // Small delay to ensure toast context is ready
+      // }
     }
-  }, [location.pathname, location.state, safeRefreshAuth, toast]);
+  }, [location.pathname, safeRefreshAuth]); // Changed from [location.pathname, location.state, safeRefreshAuth, toast]
 
+  // Show admin redirect message once then clear history state
+  useEffect(() => {
+    const message = location.state?.adminRedirect;
+    if(!message) return;
+    showToastError(message);
+
+    navigate('${location.pathname}${location.search}&{location.hash}', {
+      replace: true,
+      state: null,
+    });
+  }, [location.path, location.search, location.hash, location.state?.adminRedirect, navigate, showToastError,]);
+  
   // Clear navigation state when route changes (separate effect to avoid dependency issues)
   useEffect(() => {
     if (isNavigating) {
@@ -187,6 +257,40 @@ function ClientV2Inner() {
       safeRefreshAuth();
     }
   }, [safeRefreshAuth]);
+
+  // Password reset 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const token = params.get('reset_token');
+    if (!token || authenticated) return;
+
+    setResetTokenFromUrl(token);
+    setAuthModal('forgotConfirm');
+
+    // removes token from URL 
+    params.delete('reset_token');
+    const nextSearch = params.toString();
+    navigate(
+      `${location.pathname}${nextSearch ? `?${nextSearch}`: ''}${location.hash || ''}`,
+      { replace: true, state: location.state || null }
+    );
+  }, [location.pathname, location.search, location.hash, location.state, authenticated, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const token = params.get('verify_token');
+    if (!token || authenticated) return;
+
+    setVerifyTokenFromUrl(token);
+    setAuthModal('verifyConfirm');
+
+    params.delete('verify_token');
+    const nextSearch = params.toString();
+    navigate(
+      `${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${location.hash || ''}`,
+      { replace: true, state: location.state || null }
+    );
+  }, [location.pathname, location.search, location.hash, location.state, authenticated, navigate]);
 
   const applyDarkMode = (enable) => {
     if (enable) {
@@ -332,7 +436,7 @@ function ClientV2Inner() {
           // Use setTimeout to ensure state is updated
           setTimeout(() => {
             const authState = useAuthStore.getState();
-            if (authState.isAdmin) {
+            if (authState.role === "admin" || authState.role === "super admin") {
               toast.info('You\'re an admin. Use the Admin button in the header to open the admin panel.');
             }
           }, 100);
@@ -359,9 +463,106 @@ function ClientV2Inner() {
   );
 
   const handleRegisterSubmit = useCallback(
-    async ({ username, email, password, confirmPassword }) => {
-      if (!username || !password || !confirmPassword) {
-        toast.error('Username and both password fields are required.');
+    async ({ username, email, firstName, lastName, password, confirmPassword, discordId }) => {
+      if (!username || !firstName || !lastName || !password || !confirmPassword || !discordId) {
+        toast.error('All fields are required.');
+        return;
+      }
+      if (password.length < 8) {
+        toast.error('Password must be at least 8 characters long.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        toast.error('Passwords do not match.');
+        return;
+      }
+      // if (!/^\d{17,18}$/.test(discordId)) {
+      //   toast.error('Discord ID must be a 17 or 18 digit number');
+      //   return;
+      // }
+
+      setAuthSubmitting(true);
+      try {
+        const hashedPassword = CryptoJS.SHA256(password).toString();
+        const hashedConfirm = CryptoJS.SHA256(confirmPassword).toString();
+        const res = await fetch(`${API_BASE_URL}/users/register`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            username,
+            email: email || null,
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            password: hashedPassword,
+            password2: hashedConfirm,
+            discord_id: discordId
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const message = errData?.detail || 'Registration failed.';
+          throw new Error(message);
+        }
+
+        const data = await res.json().catch(() => ({}));
+        toast.success(
+          data?.message || 'Registration successful. Please enter the verification code sent via Discord DM or email.'
+        );
+        setVerificationEmail(email || '');
+        setAuthModal('verifyConfirm');
+        console.log('Registration successful, opening verifyConfirm modal');
+        return;
+      } catch (err) {
+        toast.error(err.message || 'Unable to register at this time.');
+      } finally {
+        setAuthSubmitting(false);
+      }
+    },
+    [toast, safeRefreshAuth]
+  );
+
+  const handlePasswordResetRequest = useCallback(
+    async ({ email }) => {
+      if (!email) {
+        toast.error('Email is required.');
+        return;
+      }
+
+      setAuthSubmitting(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/auth/password-reset/request`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim() }),
+        });
+
+        if (!res.ok && res.status !== 202) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.detail || 'Unable to request password reset.');
+        }
+
+        toast.success(
+          'If that account exists, a password reset code has been sent via Discord DM if available, otherwise via email. Enter it in the popup.'
+        );
+        setResetEmail(email.trim());
+        setAuthModal('forgotConfirm');
+      } catch (err) {
+        toast.error(err.message || 'Unable to request password reset.');
+      } finally {
+        setAuthSubmitting(false);
+      }
+    }, [toast]
+  );
+
+  const handlePasswordResetConfirm = useCallback(
+    async ({ token, password, confirmPassword }) => {
+      if (!token || !password || !confirmPassword) {
+        toast.error('Both password fields are required.');
         return;
       }
       if (password.length < 8) {
@@ -377,38 +578,103 @@ function ClientV2Inner() {
       try {
         const hashedPassword = CryptoJS.SHA256(password).toString();
         const hashedConfirm = CryptoJS.SHA256(confirmPassword).toString();
-        const res = await fetch(`${API_BASE_URL}/users/register`, {
+
+        const res = await fetch(`${API_BASE_URL}/auth/password-reset/confirm`, {
           method: 'POST',
           credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username,
-            email: email || null,
-            password: hashedPassword,
-            password2: hashedConfirm,
+            token: token.trim(),
+            new_password: hashedPassword,
+            new_password2: hashedConfirm,
           }),
         });
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          const message = errData?.detail || 'Registration failed.';
-          throw new Error(message);
+          throw new Error(errData?.detail || 'Unable to reset password.');
         }
 
-        await res.json();
-        toast.success('Account created successfully. You are now signed in.');
-        setAuthModal(null);
-        await safeRefreshAuth();
-      } catch (err) {
-        toast.error(err.message || 'Unable to register at this time.');
+        const data = await res.json().catch(() => ({}));
+        toast.success(data?.message || 'Password reset successful.');
+        setResetTokenFromUrl('');
+        setAuthModal('login');
+        navigate('/client', { replace: true })
+      }catch (err) {
+        toast.error(err.message || 'Unable to reset password.');
       } finally {
         setAuthSubmitting(false);
       }
-    },
-    [toast, safeRefreshAuth]
+    }, [toast]
   );
+
+  const handleEmailVerifyConfirm = useCallback(async ({ token }) => {
+    if (!token) {
+      toast.error('Verification token is missing.');
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/email-verify/confirm`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ token: token.trim() }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.detail || 'Unable to verify email.');
+      }
+
+      const data = await res.json().catch(() => ({}));
+      toast.success(data?.message || 'Email verified successfully.');
+      setVerifyTokenFromUrl('');
+      setAuthModal('login');
+      navigate('/client', { replace: true });
+    } catch (err) {
+      toast.error(err.message || 'Unable to verify email.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }, [toast, navigate]);
+
+  const handleEmailVerifyResend = useCallback(async ({ email }) => {
+    if (!email) {
+      toast.error('Email is required.');
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/email-verify/resend`, { 
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+
+      if (!res.ok && res.status !== 202) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.detail || 'Unable to resend verification code.');
+      }
+
+      const data = await res.json().catch(() => ({}));
+      toast.success(
+        data?.message || 'Verification code sent via Discord DM if available, otherwise email.'
+      );
+      setAuthModal('verifyConfirm');
+    } catch (err) {
+      toast.error(err.message || 'Unable to resend verification email.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }, [toast]);
 
   const handleLogout = useCallback(async () => {
     setLogoutPending(true);
@@ -427,6 +693,7 @@ function ClientV2Inner() {
       const data = await res.json().catch(() => ({}));
       toast.success(data?.message || 'Signed out successfully.');
       clearAuth();
+      navigate('/client', { replace: true });
     } catch (err) {
       toast.error(err.message || 'Unable to sign out.');
     } finally {
@@ -522,30 +789,31 @@ function ClientV2Inner() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (isAdmin) {
+                        if (role === "admin" || role === "super admin") {
                           setIsNavigating(true);
                           navigate('/admin');
                         } else {
                           toast.error('Admin access required');
                         }
                       }}
-                      disabled={!isAdmin || isNavigating}
-                      title={isAdmin ? 'Open Admin Panel' : 'Admin access required'}
+                      disabled={(role !== "admin" && role !== "super admin") || isNavigating}
+                      hidden={(role !== "admin" && role !== "super admin") || isNavigating}
+                      title={(role === "admin" || role === "super admin") ? 'Open Admin Panel' : 'Admin access required'}
                       className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                        isAdmin
+                        (role === "admin" || role === "super admin")
                           ? 'text-white hover:opacity-90 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                           : 'text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 cursor-not-allowed opacity-60'
                       }`}
-                      style={isAdmin ? { backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` } : {}}
+                      style={(role === "admin" || role === "super admin") ? { backgroundColor: `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` } : {}}
                     >
                       Admin Panel
                     </button>
-                    <button
+                    {/* <button
                       onClick={() => navigate('/topology')}
                       className="px-4 py-2 text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors"
                     >
                       Composer
-                    </button>
+                    </button> */}
                     <button
                       onClick={() => {
                         setIsNavigating(true);
@@ -621,7 +889,7 @@ function ClientV2Inner() {
                     }}
                   >
                     <aside
-                      className={`glass-panel h-full border-r border-gray-200 dark:border-gray-700 overflow-y-auto transition-all duration-300 ease-in-out ${isFiltersOpen
+                      className={`glass-panel h-full border-r border-gray-200 dark:border-gray-700 overflow-y-auto transition-all duration-300 ease-in-out  ${isFiltersOpen
                         ? 'translate-x-0 opacity-100'
                         : '-translate-x-8 opacity-0 pointer-events-none'
                         }`}
@@ -699,179 +967,312 @@ function ClientV2Inner() {
         </div>
       </div>
 
+      {statusUpdates && (
+        <StatusUpdate 
+          updates={statusUpdates} 
+          onClose={() => setStatusUpdates([])} 
+        />
+      )}
+
+      {statusUpdates.length > 0 && (
+        <StatusUpdate 
+          updates={statusUpdates} 
+          onClose={() => setStatusUpdates([])} 
+        />
+      )}
+
       {authModal && (
         <AuthModal
           mode={authModal}
           submitting={authSubmitting}
           onClose={() => setAuthModal(null)}
           onSwitchMode={() => setAuthModal((prev) => (prev === 'login' ? 'register' : 'login'))}
+          onForgotPassword={() => setAuthModal('forgotRequest')}
+          onOpenVerifyConfirm={() => setAuthModal('verifyConfirm')}
+          onOpenVerifyResend={() => setAuthModal('verifyResend')}
+          onBackToLogin={() => setAuthModal('login')}
+          onBackToResetRequest={() => setAuthModal('forgotRequest')}
+          onBackToVerifyResend={() => setAuthModal('verifyResend')}
           onLogin={handleLoginSubmit}
           onRegister={handleRegisterSubmit}
+          onRequestReset={handlePasswordResetRequest}
+          onConfirmReset={handlePasswordResetConfirm}
+          onVerifyConfirm={handleEmailVerifyConfirm}
+          onVerifyResend={handleEmailVerifyResend}
+          initialResetToken={resetTokenFromUrl}
+          initialVerifyToken={verifyTokenFromUrl}
+          initialEmail={authModal === 'forgotConfirm' ? resetEmail : verificationEmail}
         />
       )}
     </>
   );
 }
 
-function AuthModal({ mode, onClose, onSwitchMode, onLogin, onRegister, submitting }) {
+export function AuthModal({ mode, onClose, onSwitchMode, onForgotPassword, onOpenVerifyConfirm, onOpenVerifyResend, onBackToLogin, onBackToResetRequest, onBackToVerifyResend, onLogin, onRegister, onRequestReset, onConfirmReset, onVerifyConfirm, onVerifyResend, initialResetToken, initialVerifyToken, initialEmail, submitting }) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [verifyToken, setVerifyToken] = useState('');
+  const [discordId, setDiscordId] = useState('');
 
   useEffect(() => {
     setUsername('');
     setEmail('');
+    setFirstName('');
+    setLastName('');
     setPassword('');
     setConfirmPassword('');
     setShowPassword(false);
     setShowConfirmPassword(false);
-  }, [mode]);
+    setDiscordId('');
+    setResetToken('');
+    setVerifyToken('');
+
+    if (mode === 'forgotConfirm') {
+      setResetToken(initialResetToken || '');
+    }
+
+    if (mode === 'verifyResend' || mode === 'forgotConfirm') {
+      setEmail(initialEmail || '');
+    }
+
+    if (mode === 'verifyConfirm') {
+      setVerifyToken(initialVerifyToken || '');
+    }
+  }, [mode, initialEmail, initialResetToken, initialVerifyToken]);
 
   const handleSubmit = (event) => {
     event.preventDefault();
     if (mode === 'login') {
       onLogin({ username, password });
-    } else {
-      onRegister({ username, email, password, confirmPassword });
+    }
+    if (mode === 'register') {
+      onRegister({ username, email, firstName, lastName, password, confirmPassword, discordId });
+      return;
+    }
+    if (mode === 'forgotRequest') {
+      onRequestReset({ email });
+      return;
+    }
+    if (mode === 'forgotConfirm') {
+      if (!resetToken) {
+        onBackToResetRequest();
+        return;
+      }
+      onConfirmReset({ token: resetToken, password, confirmPassword });
+      return;
+    }
+
+    if (mode === 'forgotSent') {
+      onBackToLogin();
+      return;
+    }
+
+    if (mode === 'verifyResend') {
+      onVerifyResend({ email });
+      return;
+    }
+
+    if (mode === 'verifyConfirm') {
+      if (!verifyToken) {
+        onBackToVerifyResend();
+        return;
+      }
+      onVerifyConfirm({ token: verifyToken });
+      return;
     }
   };
 
+  const isForgotSent = mode === 'forgotSent';
+  const isVerifyResend = mode === 'verifyResend';
+  const isVerifyConfirm = mode === 'verifyConfirm';
+
+  const title = 
+    mode === 'login' ? 'Sign In'
+    : mode === 'register' ? 'Create Account'
+    : mode === 'forgotRequest' ? 'Reset Password'
+    : mode === 'forgotConfirm' ? 'Complete Password Reset'
+    : mode === 'verifyResend' ? 'Verify Your Email'
+    : mode === 'forgotSent' ? 'Check Your Email'
+    : 'Complete Email Verification';
+
+  const submitLabel =
+    submitting ? 'Please wait...'
+    : mode === 'login' ? 'Sign In'
+    : mode === 'register' ? 'Create Account'
+    : mode === 'forgotRequest' ? 'Send reset code'
+    : mode === 'forgotConfirm' ? 'Reset Password'
+    : mode === 'verifyResend' ? 'Resend verification code'
+    : 'Verify Email';
+
+  const isRegister = mode === 'register';
+  const isForgotRequest = mode === 'forgotRequest';
+  const isForgotConfirm = mode === 'forgotConfirm';
+  const isLogin = mode === 'login';
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" onClick={onClose} role="dialog" aria-modal="true">
       <div
-        className="w-full max-w-md rounded-2xl glass-panel shadow-2xl border border-gray-200/60 dark:border-gray-700/60 backdrop-blur"
+        className="w-full max-w-md rounded-2xl glass-panel shadow-2xl border border-gray-200/60 dark:border-gray-700/60 backdrop-blur max-h-[90vh] flex flex-col"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-200/70 dark:border-gray-700/70 px-6 py-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            {mode === 'login' ? 'Sign In' : 'Create Account'}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-100 transition-colors"
-            aria-label="Close modal"
-          >
-            ✕
-          </button>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+          <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-100 transition-colors" aria-label="Close modal">✕</button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-6 py-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-username">
-              Username
-            </label>
-            <input
-              id="auth-username"
-              type="text"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
-              style={{ '--tw-ring-color': `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` }}
-              onFocus={(e) => e.target.style.setProperty('--tw-ring-color', `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`)}
-              required
-              autoFocus
-            />
-          </div>
-
-          {mode === 'register' && (
+        <form onSubmit={handleSubmit} className="px-6 py-6 space-y-4 flex-1 overflow-y-auto">
+          {(isLogin || isRegister) && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">
-                Email (optional)
-              </label>
-              <input
-                id="auth-email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
-                style={{ '--tw-ring-color': `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))` }}
-                onFocus={(e) => e.target.style.setProperty('--tw-ring-color', `hsl(var(--accent-hue), var(--accent-saturation), var(--accent-lightness))`)}
-                placeholder="you@example.com"
-              />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-username">Username</label>
+              <input id="auth-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2" required autoFocus />
             </div>
           )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-password">
-              Password
-            </label>
-            <div className="relative">
-              <input
-                id="auth-password"
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="w-full glass-input rounded-md px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((prev) => !prev)}
-                className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? '🙈' : '👁️'}
-              </button>
+          {(isRegister || isForgotRequest || isVerifyResend) && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">Email</label>
+              <input id="auth-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2" placeholder="you@example.com" required />
             </div>
-          </div>
+          )}
 
-          {mode === 'register' && (
+          {isForgotConfirm && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-email">Email</label>
+              <input id="auth-email" type="email" value={email} disabled className="w-full glass-input rounded-md px-3 py-2 text-sm bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700" placeholder="you@example.com" />
+            </div>
+          )}
+
+          {isRegister && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-discord-id">Discord ID</label>
+              <input id="auth-discord-id" type="text" value={discordId} onChange={(e) => setDiscordId(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2" placeholder="123456789012345678" required />
+            </div>
+          )}
+
+          {isRegister && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="First Name" className="w-full glass-input rounded-md px-3 py-2 text-sm" required />
+              <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Last Name" className="w-full glass-input rounded-md px-3 py-2 text-sm" required />
+            </div>
+          )}
+
+          {(isLogin || isRegister || isForgotConfirm) && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-password">
+                {isForgotConfirm ? 'New Password' : 'Password'}
+              </label>
+              <input id="auth-password" type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm" required />
+            </div>
+          )}
+
+          {(isRegister || isForgotConfirm) && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-confirm-password">
-                Confirm Password
+                {isForgotConfirm ? 'Confirm New Password' : 'Confirm Password'}
               </label>
-              <div className="relative">
-                <input
-                  id="auth-confirm-password"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  className="w-full glass-input rounded-md px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword((prev) => !prev)}
-                  className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                  aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
-                >
-                  {showConfirmPassword ? '🙈' : '👁️'}
-                </button>
-              </div>
+              <input id="auth-confirm-password" type={showConfirmPassword ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full glass-input rounded-md px-3 py-2 text-sm" required />
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full glass-button flex items-center justify-center py-2 text-sm font-semibold uppercase tracking-wide disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {submitting ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
+          {isForgotConfirm && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" htmlFor="auth-reset-token">Password Reset Code</label>
+              <input
+                id="auth-reset-token"
+                type="text"
+                value={resetToken}
+                onChange={(e) => setResetToken(e.target.value)}
+                className="w-full glass-input rounded-md px-3 py-2 text-sm"
+                placeholder="Enter code from Discord DM or email"
+                required
+              />
+            </div>
+          )}
+
+          {isForgotSent && (
+            <div className="text-sm text-gray-700 dark:text-gray-300">
+              If that account exists, a password reset code has been sent via Discord DM if available, otherwise via email. Check your inbox and spam folder.
+            </div>
+          )}
+
+          {isVerifyConfirm && (
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1' htmlFor='auth-verify-token'>Verification Token</label>
+              <input
+                id="auth-verify-token"
+                type="text"
+                value={verifyToken}
+                onChange={(e) => setVerifyToken(e.target.value)}
+                className="w-full glass-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                placeholder='Enter code from Discord DM or email'
+                required
+              />
+            </div>
+          )}
+
+          <button type="submit" disabled={submitting} className="w-full glass-button flex items-center justify-center py-2 text-sm font-semibold uppercase tracking-wide disabled:opacity-70 disabled:cursor-not-allowed">
+            {submitLabel}
           </button>
         </form>
 
         <div className="border-t border-gray-200/60 dark:border-gray-700/60 px-6 py-4 text-sm text-center text-gray-600 dark:text-gray-300">
-          {mode === 'login' ? (
+          {isLogin && (
             <>
-              Need an account?{' '}
+              <button type="button" onClick={onForgotPassword} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Forgot password?
+              </button>
+              <button type="button" onClick={onOpenVerifyConfirm} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Verify email
+              </button>
               <button type="button" onClick={onSwitchMode} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
                 Register
               </button>
             </>
-          ) : (
+          )}
+          {isRegister && (
+            <button type="button" onClick={onSwitchMode} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+              Sign in
+            </button>
+          )}
+          {isForgotRequest && (
+            <button type="button" onClick={onBackToLogin} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+              Back to Sign in
+            </button>
+          )}
+          {isForgotConfirm && (
             <>
-              Already have an account?{' '}
-              <button type="button" onClick={onSwitchMode} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
-                Sign in
+              <button type="button" onClick={onBackToResetRequest} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Request new email
+              </button>
+              <button type="button" onClick={onBackToLogin} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+                Back to Sign in
+              </button>
+            </>
+          )}
+          {isVerifyResend && (
+            <>
+              <button type="button" onClick={onOpenVerifyConfirm} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Have a code?
+              </button>
+              <button type="button" onClick={onBackToLogin} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+                Back to Sign in
+              </button>
+            </>
+          )}
+          {isVerifyConfirm && (
+            <>
+              <button type="button" onClick={onOpenVerifyResend} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mr-3">
+                Resend code
+              </button>
+              <button type="button" onClick={onBackToLogin} className="font-medium text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300">
+                Back to Sign in
               </button>
             </>
           )}
@@ -924,4 +1325,3 @@ function UnauthenticatedLanding({ onLogin, onRegister }) {
     </div>
   );
 }
-

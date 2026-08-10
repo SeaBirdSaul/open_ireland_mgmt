@@ -1,4 +1,10 @@
+/**
+ * Zustand store for managing scheduler state, including filters,
+ * timeline, booking cart, UI state, linked device groups,
+ * booking templates, and bulk booking mode.
+ */
 import { create } from 'zustand';
+import { parseLocalDate, formatLocalDateKey, addDaysLocal } from '../client/v2/utils/localDate';
 
 // Load persisted state from localStorage
 const loadPersistedFilters = () => {
@@ -223,10 +229,9 @@ const useSchedulerStore = create((set, get) => ({
 
     const shiftDate = (dateStr, weeks) => {
       if (!dateStr) return dateStr;
-      const dateObj = new Date(dateStr);
-      if (Number.isNaN(dateObj.getTime())) return dateStr;
-      dateObj.setDate(dateObj.getDate() + weeks * 7);
-      return dateObj.toISOString().split('T')[0];
+      const dateObj = parseLocalDate(dateStr);
+      if (!dateObj) return dateStr;
+      return formatLocalDateKey(addDaysLocal(dateObj, weeks * 7));
     };
 
     const nextDateRange =

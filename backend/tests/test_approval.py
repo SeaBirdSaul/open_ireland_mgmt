@@ -3,14 +3,20 @@ Tests for booking approval/rejection endpoints
 """
 import pytest
 from datetime import datetime, timedelta
-from models import Booking
+from backend.scheduler.models import Booking
 from unittest.mock import patch
+
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
+
+ADMIN_NOTIFY_PATH = "backend.scheduler.routers.admin.send_admin_action_notification"
 
 
 def test_get_pending_bookings(authenticated_admin_client, test_user, test_device, db_session):
     """Test getting all pending bookings"""
     # Create pending booking
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     booking = Booking(
         device_id=test_device.id,
         user_id=test_user.id,
@@ -43,7 +49,7 @@ def test_approve_booking(authenticated_admin_client, test_booking):
     """Test approving a pending booking"""
     test_booking.status = "PENDING"
     
-    with patch('admin.send_admin_action_notification'):
+    with patch(ADMIN_NOTIFY_PATH):
         response = authenticated_admin_client.put(
             f"/admin/bookings/{test_booking.booking_id}",
             json={"status": "CONFIRMED"}
@@ -57,7 +63,7 @@ def test_reject_booking(authenticated_admin_client, test_booking):
     """Test rejecting a pending booking"""
     test_booking.status = "PENDING"
     
-    with patch('admin.send_admin_action_notification'):
+    with patch(ADMIN_NOTIFY_PATH):
         response = authenticated_admin_client.put(
             f"/admin/bookings/{test_booking.booking_id}",
             json={"status": "REJECTED"}
@@ -97,7 +103,7 @@ def test_approve_booking_requires_admin(authenticated_client, test_booking):
 def test_get_conflicting_bookings(authenticated_admin_client, test_user, test_device, db_session):
     """Test getting conflicting bookings"""
     # Create two conflicting bookings
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     booking1 = Booking(
@@ -127,7 +133,7 @@ def test_get_conflicting_bookings(authenticated_admin_client, test_user, test_de
 
 def test_approve_conflicting_booking(authenticated_admin_client, test_user, test_device, db_session):
     """Test that admin can approve conflicting bookings"""
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     conflicting_booking = Booking(
         device_id=test_device.id,
         user_id=test_user.id,
@@ -138,7 +144,7 @@ def test_approve_conflicting_booking(authenticated_admin_client, test_user, test
     db_session.add(conflicting_booking)
     db_session.commit()
     
-    with patch('admin.send_admin_action_notification'):
+    with patch(ADMIN_NOTIFY_PATH):
         response = authenticated_admin_client.put(
             f"/admin/bookings/{conflicting_booking.booking_id}",
             json={"status": "CONFIRMED"}
@@ -147,4 +153,3 @@ def test_approve_conflicting_booking(authenticated_admin_client, test_user, test
     assert response.status_code == 200
     db_session.refresh(conflicting_booking)
     assert conflicting_booking.status == "CONFIRMED"
-

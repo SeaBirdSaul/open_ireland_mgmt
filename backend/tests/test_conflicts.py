@@ -3,13 +3,16 @@ Tests for conflict detection functionality
 """
 import pytest
 from datetime import datetime, timedelta
-from models import Booking, Device, User
-from hash import hash_password
+from backend.scheduler.models import Booking, Device, User
+from backend.core.hash import hash_password
+import pytz
+
+IRELAND_TZ = pytz.timezone('Etc/GMT-1')
 
 
 def test_check_conflicts_no_conflicts(authenticated_client, test_device):
     """Test conflict check when there are no conflicts"""
-    start_time = datetime.now() + timedelta(days=2)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=2)
     end_time = start_time + timedelta(days=1)
     
     response = authenticated_client.post(
@@ -29,7 +32,7 @@ def test_check_conflicts_no_conflicts(authenticated_client, test_device):
 def test_check_conflicts_with_booking_overlap(authenticated_client, test_user, test_device, db_session):
     """Test conflict detection with overlapping booking"""
     # Create existing booking
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     existing_booking = Booking(
@@ -64,7 +67,7 @@ def test_check_conflicts_with_booking_overlap(authenticated_client, test_user, t
 def test_check_conflicts_with_maintenance(authenticated_client, test_device, db_session):
     """Test conflict detection with maintenance period"""
     # Set maintenance period
-    tomorrow = datetime.now() + timedelta(days=1)
+    tomorrow = datetime.now(IRELAND_TZ) + timedelta(days=1)
     maintenance_start = f"All Day/{tomorrow.date().strftime('%Y-%m-%d')}"
     maintenance_end = f"All Day/{tomorrow.date().strftime('%Y-%m-%d')}"
     
@@ -112,7 +115,7 @@ def test_check_conflicts_multiple_devices(authenticated_client, db_session):
     db_session.add_all([device1, device2])
     db_session.commit()
     
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(days=1)
     
     response = authenticated_client.post(
@@ -130,7 +133,7 @@ def test_check_conflicts_multiple_devices(authenticated_client, db_session):
 
 def test_check_conflicts_pending_bookings(authenticated_client, test_user, test_device, db_session):
     """Test that pending bookings are considered in conflict check"""
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     pending_booking = Booking(
@@ -164,7 +167,7 @@ def test_check_conflicts_pending_bookings(authenticated_client, test_user, test_
 
 def test_check_conflicts_cancelled_bookings_ignored(authenticated_client, test_user, test_device, db_session):
     """Test that cancelled bookings are not considered conflicts"""
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     cancelled_booking = Booking(
@@ -205,19 +208,19 @@ def test_max_two_users_per_device(authenticated_client, test_device, db_session)
         username="user1",
         email="user1@test.com",
         password=hash_password("pass123"),
-        is_admin=False
+        role="viewer"
     )
     user2 = User(
         username="user2",
         email="user2@test.com",
         password=hash_password("pass123"),
-        is_admin=False
+        role="viewer"
     )
     db_session.add_all([user1, user2])
     db_session.commit()
     
     # Create two bookings for same device at same time
-    start_time = datetime.now() + timedelta(days=1)
+    start_time = datetime.now(IRELAND_TZ) + timedelta(days=1)
     end_time = start_time + timedelta(hours=5)
     
     booking1 = Booking(

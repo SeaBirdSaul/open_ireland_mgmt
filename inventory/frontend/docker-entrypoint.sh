@@ -1,3 +1,10 @@
+
+# Docker entrypoint script for the inventory management frontend
+# Sets up symlinks and ensures dependencies are installed
+#   before starting the application
+# Usage: This script is executed as the entrypoint in the Docker container
+# It prepares the environment and then runs the provided command.
+
 #!/bin/sh
 set -e
 

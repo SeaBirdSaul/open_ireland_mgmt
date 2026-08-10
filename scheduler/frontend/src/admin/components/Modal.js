@@ -1,4 +1,9 @@
+/**
+ * A reusable modal dialog component for the admin interface.
+ * Supports customizable title, size, and footer actions.
+ */
 import React from 'react';
+import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 
 export default function Modal({ 
@@ -18,14 +23,14 @@ export default function Modal({
     xl: 'max-w-4xl',
   };
 
-  return (
+  return createPortal(
     <div 
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
       onClick={onClose}
     >
       <div 
         className={clsx(
-          'bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full mx-4',
+          'bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full mx-4 max-h-[calc(100vh-2rem)] flex flex-col',
           sizeClasses[size]
         )}
         onClick={(e) => e.stopPropagation()}
@@ -42,7 +47,7 @@ export default function Modal({
             </button>
           </div>
         )}
-        <div className="px-6 py-4">
+        <div className="px-6 py-4 overflow-y-auto">
           {children}
         </div>
         {footer && (
@@ -51,7 +56,8 @@ export default function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

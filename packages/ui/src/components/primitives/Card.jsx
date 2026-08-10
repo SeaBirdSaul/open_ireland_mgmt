@@ -1,4 +1,5 @@
-// TODO: Implement component (placeholder)
+// Card component for displaying content in a styled container
+// Accepts props: children (content), title (string), subtitle (string), actions (React nodes), className (string)
 import React from 'react';
 import clsx from 'clsx';
 

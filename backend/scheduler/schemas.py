@@ -1,19 +1,26 @@
 # schemas.py
-
+'''
+Pydantic schemas for the scheduler application.
+Includes user, booking, admin, device, and topology schemas
+    with validation and serialization rules.
+'''
 from pydantic import BaseModel, validator, IPvAnyAddress, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from enum import Enum
+import re
 
 
 # ================== User Part ==================
 class UserBase(BaseModel):
     username: str
-    email: Optional[str] = None
+    email: str
     discord_id: Optional[str] = None
 
 
 class UserCreate(UserBase):
+    firstName: str = Field(min_length=1, max_length=200)
+    lastName: str = Field(min_length=1, max_length=200)
     password: str
     password2: str
 
@@ -35,8 +42,8 @@ class UserCreate(UserBase):
 class User(BaseModel):
     id: int
     username: str
-    email: Optional[str] = None
-    is_admin: bool
+    email: str
+    role: str
     discord_id: Optional[str] = None
 
     class Config:
@@ -47,6 +54,46 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+# ================= Emails ========================
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=200)
+
+    @validator("email")
+    def validate_email(cls, v):
+        email = v.strip().lower()
+        if "@" not in email or "." not in email.split("@")[-1]:
+            raise ValueError("Invalid email format")
+        return email
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(min_length=6, max_length=512)
+    new_password: str = Field(min_length=64, max_length=64) # Pre hased in SHA256 hex from fronted
+    new_password2: str = Field(min_length=64, max_length=64) # Pre hased in SHA256 hex from fronted
+
+    @validator("new_password")
+    def validate_sha256_password(cls, v):
+        if not re.fullmatch(r"[a-f0-9]{64}", v):
+            raise ValueError("Password must be SHA256 hex digest")
+        return v
+    
+    @validator("new_password2")
+    def password_match(cls, v, values, **kwargs):
+        if "new_password" in values and v != values["new_password"]:
+            raise ValueError("Passwords do now match.")
+        return v
+
+class EmailVerificationConfirm(BaseModel):
+    token: str = Field(min_length=6, max_length=512)
+
+class EmailVerificationResend(BaseModel):
+    email: str = Field(min_length=3, max_length=200)
+
+    @validator("email")
+    def validate_email(cls, v):
+        email = v.strip().lower()
+        if "@" not in email or "." not in email.split("@")[-1]:
+            raise ValueError("Invalid email format")
+        return email
 
 # ================== Booking Part ==================
 class BookingItem(BaseModel):
@@ -140,10 +187,10 @@ class AdminCreate(BaseModel):
 
 
 class AdminRoleType(str, Enum):
-    super_admin = "Super Admin"
-    admin = "Admin"
-    approver = "Approver"
-    viewer = "Viewer"
+    super_admin = "super admin"
+    admin = "admin"
+    approver = "approver"
+    viewer = "viewer"
 
 
 class AdminStatus(str, Enum):
@@ -375,7 +422,39 @@ class AdminUserInviteRequest(BaseModel):
     email: str
     handle: Optional[str] = None
     role: AdminRoleType
+    firstName: str = Field(min_length=1, max_length=50)
+    lastName: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=8, max_length=128)
+    notes: Optional[str] = Field(default=None, max_length=4000)
 
+class InviteAcceptRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+
+class AdminInvitationRow(BaseModel):
+    id: int
+    email: str
+    firstName: str
+    lastName: str
+    handle: Optional[str] = None
+    role: str
+    notes: Optional[str] = None
+    invited_by: Optional[str] = None
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: Optional[datetime] = None
+    status: str 
+
+class AdminInvitationListResponse(BaseModel):
+    items: List[AdminInvitationRow]
+    meta: PaginationMeta
+
+class AdminInvitationRejectRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=4000)
+
+class AdminInvitationActionResponse(BaseModel):
+    invitation_id: int
+    status: str
+    user_id: Optional[int] = None
 
 class AdminUserRoleUpdateRequest(BaseModel):
     role: AdminRoleType
@@ -709,3 +788,4 @@ class ConfigurationRecommendation(BaseModel):
 class TopologySuggestResponse(BaseModel):
     recommendations: List[ConfigurationRecommendation]
     total_recommendations: int
+
