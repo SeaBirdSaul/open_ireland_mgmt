@@ -211,8 +211,13 @@ The Open Ireland Lab Management System consists of:
    environment:
      - DATABASE_URL=mysql+pymysql://username:password@host:3306/provdb_dev
    ```
+   Also update the 'DISCORD_BOT_TOKEN', instructions can be found in [DISCORD_SETUP.md](DISCORD_SETUP.md):
+   ```yaml
+   environment:
+     - DISCORD_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+   ```
    
-   > ⚠️ **Important**: Always use `provdb_dev` (development database), never `provdb` (production).
+   > ⚠️ **Important**: Always use `provdb_prod` (development database), never `provdb` (production).
 
 3. **Build and start all services**:
    ```bash
@@ -259,6 +264,87 @@ The Open Ireland Lab Management System consists of:
 | `REACT_APP_API_URL` | Backend API URL | `http://localhost:20001` |
 | `REACT_APP_SCHEDULER_API_URL` | Scheduler API URL | Same as above |
 | `PORT` | React dev server port | `3000`/`3001` |
+
+---
+
+## Adding a User/Setting up the first User
+
+### Prerequisites
+
+- A running frontend and backend.
+- The Discord ID of the account you wish to link with the Scheduler.
+- Said account in a server with the discord bot.
+
+### Adding a basic User to the Scheduler
+
+
+1. **Open the Scheduler frontend**
+
+   Open the scheduler UI at `http://localhost:25002` (the backend API runs at `http://localhost:20001` — API docs are available at `http://localhost:20001/docs`).
+
+2. **Register an account**
+
+   Click the **REGISTER** button and complete the account form. Ensure the email and Discord ID are correct — these are used for authentication and notifications.
+
+3. **Enter the verification token**
+
+   After registering, an authentication token is sent by the Discord bot (usually via DM). Enter that token on the registration confirmation / verification page in the scheduler UI to activate the account. If you do not receive a token, check the bot setup in [DISCORD_SETUP.md](DISCORD_SETUP.md) and verify the bot can DM the user.
+
+   If the UI does not show a verification field, look for a link or prompt in the registration flow labelled "Enter verification token" or similar.
+
+### Setting up the initial admin user (manual DB example)
+
+> Note: Prefer granting admin privileges through the admin UI when available. Only use direct DB updates on a development or staging database, and never perform manual edits on a production database without a backup and explicit approval.
+
+1. **Log into MySQL** (example)
+
+```bash
+mysql -u <username> -p -h <host> provdb_dev
+# or: mysql -u <username> -p
+# then: USE provdb_dev;
+```
+
+2. **Verify the user record**
+
+Use a targeted `SELECT` rather than `SELECT *` to inspect the relevant fields:
+
+```sql
+SELECT id, username, email, discord_id, status, role, is_admin
+FROM provdb_dev.user_table
+WHERE id = <userID>;
+```
+
+Example output (column names may vary depending on your schema):
+
+| id | username | firstName | lastName | email | discord_id | status | role |
+|----|----------|-----------|----------|-------|------------|--------|------|
+| 1  | jsmith   | John      | Smith    | ...   | 123456789  | active | viewer 
+
+3. **Update role (two common schema variations)**
+
+- If your table uses a `role` column:
+
+```sql
+UPDATE provdb_dev.user_table
+SET role = 'admin'
+WHERE id = <userID>;
+```
+
+4. **Verify the change**
+
+```sql
+SELECT id, username, role, is_admin FROM provdb_dev.user_table WHERE id = <userID>;
+```
+
+### Safety and audit notes
+
+- Do not perform manual changes directly on the production database. Use a development or staging instance (for example: `provdb_dev`) and ensure you have a recent backup before applying changes.
+- Prefer the admin console or an authenticated API endpoint to change roles; direct SQL updates circumvent application-level auditing.
+- Record any manual changes in your deployment or ops logs for auditability.
+
+### Results
+
+After granting the admin role (via the admin UI or the DB update above), the user will have access to the Admin Console and can manage bookings and user roles through the application UI instead of manual DB edits.
 
 ---
 
